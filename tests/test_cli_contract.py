@@ -5,7 +5,8 @@ increment: help text, exit codes, and the shape of failure messages.
 """
 import pytest
 
-from restverify import EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, __version__
+from restverify import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE,
+                        __version__)
 from restverify.cli import main
 
 
@@ -13,6 +14,8 @@ from restverify.cli import main
 
 def test_exit_code_contract_values():
     assert (EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_DIFF_MISMATCH) == (0, 1, 2)
+    # usage failures are not verification outcomes, so they must not borrow 1/2
+    assert EXIT_USAGE == 64
 
 
 def test_top_level_help_documents_the_job_and_exit_codes(capsys):
@@ -59,12 +62,19 @@ def test_bad_flag_teaches_instead_of_traceback(capsys):
     with pytest.raises(SystemExit) as e:
         main(["run", "--nope"])
     err = capsys.readouterr().err
-    assert e.value.code == 2
+    assert e.value.code == EXIT_USAGE
     assert "error:" in err
     assert "next:" in err, "usage errors must name the next command (U2c)"
 
 
-@pytest.mark.parametrize("cmd,ptr", [("run", "I1"), ("report", "I4"), ("cron", "I5")])
+def test_help_documents_the_usage_code(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    assert "64" in out, "the -64 usage code must be documented in --help (U3)"
+
+
+@pytest.mark.parametrize("cmd,ptr", [("report", "I4"), ("cron", "I5")])
 def test_unimplemented_commands_are_honest(cmd, ptr, capsys):
     """Gate G6: the scaffold must not pretend to work."""
     code = main([cmd])

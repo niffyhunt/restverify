@@ -37,3 +37,7 @@ class ResticFailed(RestverifyError):
 
 class ConfigError(RestverifyError):
     pass
+
+
+class TempDirError(RestverifyError):
+    """The restore directory could not be created (permissions, full disk)."""

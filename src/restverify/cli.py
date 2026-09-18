@@ -1,20 +1,23 @@
 """Command-line surface for restverify.
 
-Usability law U3: --help is documentation. The top-level help must let a user
-succeed without opening the README, and every subcommand shows examples.
-
-Usability law U1: zero-config-first. `restverify run -r <repo>` is a complete
-first experience; the config file is for extra repos and power users only.
-
-Usability law U2: failures teach. Nothing below raises a bare traceback at the
-user; every error path returns a code and a next command.
+U3: --help is documentation — the top-level help must let a user succeed
+without opening the README, and every subcommand shows examples.
+U1: zero-config-first — `restverify run -r <repo>` is a complete first run.
+U2: failures teach — nothing here lets a bare traceback reach the user.
 """
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
+import time
 
-from . import (__version__, EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL)
+from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE, __version__)
+from . import config as cfgmod
+from . import restic as resticmod
+from . import tempstore
+from .errors import ConfigError, RestverifyError
 
 PROG = "restverify"
 
@@ -27,81 +30,84 @@ DESCRIPTION = (
 
 EPILOG = """examples:
   restverify run -r /srv/backup            verify the newest snapshot (start here)
-  restverify run -r /srv/backup --dry-run  show what would be restored, restore nothing
-  restverify run --json                    machine-readable result for cron/CI
-  restverify init                          add repos/watch paths to the config
-  restverify report                        run history and trend, failures in plain words
+  restverify run -r /srv/backup --dry-run  show what would happen; restore nothing
+  restverify init -r /srv/backup           save a repo (with source/excludes) to config
+  restverify report                        run history and trend
   restverify cron                          print a ready-to-paste crontab line
 
 exit codes:
-  0  restore verified (or all repos verified, for a multi-repo run)
-  1  restic could not restore the snapshot
-  2  restored data differs from the source
+  0   restore verified
+  1   the run could not complete (restic failed, no snapshots, restic missing)
+  2   restored data differs from the source
+  64  usage problem (bad flag, unusable config) — never a verification outcome
 
 next: run `restverify run -r <repo>` to verify your first snapshot
 """
 
 
 class _Parser(argparse.ArgumentParser):
-    """Parser that reports usage errors as teaching errors (U2), not tracebacks."""
+    """Usage errors teach instead of dumping a traceback (U2)."""
 
-    def error(self, message: str):  # pragma: no cover - exercised via CLI tests
+    def error(self, message: str):
         self.print_usage(sys.stderr)
         print(f"{PROG}: error: {message}", file=sys.stderr)
         print(f"  next: {PROG} --help", file=sys.stderr)
-        raise SystemExit(2)
-
-
-def _pending(cmd: str, increment: str) -> int:
-    """Honest scaffold state (gate G6): name what is missing and where it lands."""
-    print(
-        f"{PROG}: '{cmd}' is not implemented yet in this build.\n"
-        f"  why:   scaffold builds the CLI surface and contract first\n"
-        f"  next:  implemented in increment {increment}; see docs/PHASE2-PLAN.md",
-        file=sys.stderr,
-    )
-    return EXIT_RESTORE_FAIL
+        raise SystemExit(EXIT_USAGE)
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true",
-                   help="print a complete machine-readable result on stdout")
+                   help="machine-readable output (complete in increment I3)")
     p.add_argument("--config", metavar="PATH", default=None,
-                   help="config file to use (default: ~/.config/restverify/config.toml)")
+                   help=f"config file to use (default: {cfgmod.default_config_path()})")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(prog=PROG, description=DESCRIPTION, epilog=EPILOG,
                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--version", action="version",
-                        version=f"{PROG} {__version__}")
+    parser.add_argument("--version", action="version", version=f"{PROG} {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     p_init = sub.add_parser(
-        "init", help="add repos and watch paths to the config (interactive)",
-        description="Walk through adding a restic repo, then write the config.",
-        epilog="examples:\n  restverify init\n  restverify init --config ./rv.toml",
+        "init", help="save a repository (and optional source/excludes) to the config",
+        description="Add a restic repository to the config. With no --repo and a "
+                    "terminal attached, restverify asks for it.",
+        epilog="examples:\n  restverify init -r /srv/backup\n"
+               "  restverify init -r /srv/backup -s /srv/data -x '*.log' -x cache/\n"
+               "  restverify init -r b2:bucket:path --password-command 'pass show restic/srv'",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_init.add_argument("-r", "--repo", metavar="PATH", help="restic repository location")
+    p_init.add_argument("-s", "--source", metavar="PATH",
+                        help="original source path to compare restores against")
+    p_init.add_argument("-x", "--exclude", action="append", default=[], metavar="PATTERN",
+                        help="exclude pattern (repeatable)")
+    p_init.add_argument("--name", metavar="NAME", help="short name for this repo (default: last path segment)")
+    p_init.add_argument("--password-command", metavar="CMD",
+                        help="command that prints the repo password; the password itself is never stored")
+    p_init.add_argument("--snapshot", metavar="SELECTOR", default=cfgmod.DEFAULT_SNAPSHOT,
+                        help="snapshot to verify: 'latest' (default) or a short id")
     _add_common(p_init)
 
     p_run = sub.add_parser(
         "run", help="restore the newest snapshot to a temp dir and verify it",
-        description="Restore, compare, report. Read-only on the repo; never "
-                    "writes to your source paths unless --strict compares them.",
+        description="Restore, compare, report. Read-only on the repository; never writes "
+                    "to your source paths.",
         epilog="examples:\n  restverify run -r /srv/backup\n"
-               "  restverify run -r /srv/backup --dry-run\n"
-               "  restverify run --no-source --json",
+               "  restverify run -r /srv/backup --dry-run\n  restverify run --no-source\n"
+               "  restverify run -r /srv/backup -s /srv/data --strict",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_run.add_argument("-r", "--repo", metavar="PATH",
-                       help="restic repository (path or restic location string)")
-    p_run.add_argument("--source", metavar="PATH",
+                       help="restic repository (or a repo name saved in the config)")
+    p_run.add_argument("-s", "--source", metavar="PATH",
                        help="original source path to compare against (overrides config)")
     p_run.add_argument("--dry-run", action="store_true",
                        help="show what would happen; restore nothing")
     p_run.add_argument("--no-source", action="store_true",
-                       help="verify the restore succeeds without comparing to a source")
+                       help="verify the restore completes without comparing to a source")
     p_run.add_argument("--strict", action="store_true",
-                       help="fail on any file-count or hash difference (read-only check)")
+                       help="tighten comparison: fail on any count or hash difference")
+    p_run.add_argument("--snapshot", metavar="SELECTOR", default=None,
+                       help="snapshot to verify: 'latest' (default) or a short id")
     _add_common(p_run)
 
     p_report = sub.add_parser(
@@ -114,12 +120,146 @@ def build_parser() -> argparse.ArgumentParser:
     p_cron = sub.add_parser(
         "cron", help="print a crontab line for a scheduled verification",
         description="Print (never install) a crontab line you can paste.",
-        epilog="examples:\n  restverify cron\n  restverify cron --repo /srv/backup",
+        epilog="examples:\n  restverify cron\n  restverify cron -r /srv/backup",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_cron.add_argument("-r", "--repo", metavar="PATH", help="restic repository")
     _add_common(p_cron)
-
     return parser
+
+
+def _note_json_deferred(args) -> None:
+    """G6: --json is documented as incomplete (I3) and must not fake a schema."""
+    if getattr(args, "json", False):
+        print(f"{PROG}: --json is not complete until increment I3; "
+              "showing the human-readable output instead.", file=sys.stderr)
+
+
+def _pending(cmd: str, increment: str) -> int:
+    print(f"{PROG}: '{cmd}' is not implemented yet in this build.\n"
+          f"  why:   scaffold builds the CLI surface and contract first\n"
+          f"  next:  implemented in increment {increment}; see docs/PHASE2-PLAN.md",
+          file=sys.stderr)
+    return EXIT_RESTORE_FAIL
+
+
+# ── init ────────────────────────────────────────────────────────────────────
+
+def _cmd_init(args) -> int:
+    _note_json_deferred(args)
+    repo = args.repo
+    if not repo and sys.stdin.isatty():
+        try:
+            repo = input("restic repository to verify (path, or b2:s3:... location): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n{PROG}: nothing added.", file=sys.stderr)
+            return EXIT_USAGE
+    if not repo:
+        raise ConfigError(
+            "no repository given, so there is nothing to save.",
+            hint="run `restverify init -r /path/to/repo` (add -s /source and -x pattern as needed)",
+        )
+
+    config = cfgmod.load_config(args.config)
+    entry = cfgmod.RepoEntry(
+        name=args.name or cfgmod.RepoEntry(name="", repo=repo).name
+             or os.path.basename(repo.rstrip("/")) or repo,
+        repo=repo,
+        source=args.source,
+        excludes=list(args.exclude),
+        snapshot=args.snapshot or cfgmod.DEFAULT_SNAPSHOT,
+        password_command=args.password_command,
+    )
+    existing = config.find(repo)
+    if existing:
+        config.repos[config.repos.index(existing)] = entry
+        verb = "updated"
+    else:
+        config.repos.append(entry)
+        verb = "added"
+    path = cfgmod.save_config(config, args.config)
+
+    print(f"✓ {verb} '{entry.name}' in {path}")
+    if not entry.source:
+        print("  note: no source path yet, so `run` will verify the restore completes "
+              "without comparing files\n        add one with `restverify init -r <repo> -s <source>`")
+    if not entry.password_command:
+        print("  note: no password_command saved; set RESTIC_PASSWORD_COMMAND or "
+              "re-run init with --password-command")
+    print(f"\nnext: restverify run -r {entry.name}")
+    return EXIT_PASS
+
+
+# ── run ────────────────────────────────────────────────────────────────────
+
+def _resolve_entry(args, config):
+    """U1: -r wins; a config name also works; else the single configured repo."""
+    entry = None
+    if args.repo:
+        entry = config.find(args.repo)
+        if entry is None:
+            entry = cfgmod.RepoEntry(name=args.repo, repo=args.repo)
+    elif len(config.repos) == 1:
+        entry = config.repos[0]
+    elif len(config.repos) > 1:
+        names = ", ".join(r.name for r in config.repos)
+        raise ConfigError(
+            f"{len(config.repos)} repositories are configured, so one must be named.",
+            hint=f"run `restverify run -r <name>` — saved names: {names}",
+        )
+    else:
+        raise ConfigError(
+            "no repository given and none is saved in the config.",
+            hint="run `restverify run -r /path/to/repo` (or save it with `restverify init -r ...`)",
+        )
+    if args.source:
+        entry.source = args.source
+    if args.no_source:
+        entry.no_source = True
+    if args.strict:
+        entry.strict = True
+    if args.snapshot:
+        entry.snapshot = args.snapshot
+    return entry
+
+
+def _cmd_run(args) -> int:
+    _note_json_deferred(args)
+    config = cfgmod.load_config(args.config)
+    entry = _resolve_entry(args, config)
+
+    swept = tempstore.sweep_stale()
+    if swept:
+        print(f"  cleaned up {len(swept)} leftover restore dir(s) from a previous run")
+
+    selector = entry.snapshot or cfgmod.DEFAULT_SNAPSHOT
+    password_command = entry.password_command or os.environ.get("RESTIC_PASSWORD_COMMAND")
+
+    if args.dry_run:
+        print("dry run — nothing will be restored")
+        print(f"  repo     : {entry.repo}")
+        print(f"  snapshot : {selector}")
+        print(f"  source   : {entry.source or '(none saved)'}")
+        print(f"  compare  : {'off (--no-source)' if entry.no_source or not entry.source else 'on'}")
+        print(f"  excludes : {', '.join(entry.excludes) if entry.excludes else '(none)'}")
+        print(f"  temp dir : a fresh private dir under {tempstore.base_dir()}, removed afterwards")
+        print("✓ PASS (dry run) — nothing was restored, nothing was written")
+        return EXIT_PASS
+
+    started = time.time()
+    snapshot = resticmod.newest_snapshot(entry.repo, password_command, selector)
+    with tempstore.restore_dir(entry.repo) as target:
+        resticmod.restore(entry.repo, snapshot, target,
+                          excludes=entry.excludes, password_command=password_command)
+    elapsed = int(time.time() - started)
+    print(f"✓ restored snapshot {snapshot.short_id} in {elapsed}s; temp dir cleaned up")
+    print("  note: file counts and the source comparison arrive in increment I2")
+    return EXIT_PASS
+
+
+# ── dispatch ────────────────────────────────────────────────────────────────
+
+_DISPATCH = {"init": _cmd_init, "run": _cmd_run}
+_PENDING = {"report": "I4", "cron": "I5"}
 
 
 def main(argv=None) -> int:
@@ -128,16 +268,23 @@ def main(argv=None) -> int:
     if not args.command:
         parser.print_help()
         return EXIT_PASS
-    if args.command == "init":
-        return _pending("init", "I1 (interactive walkthrough) / I5 (CLI polish)")
-    if args.command == "run":
-        return _pending("run", "I1 (restore-to-temp) then I2/I3")
-    if args.command == "report":
-        return _pending("report", "I4")
-    if args.command == "cron":
-        return _pending("cron", "I5")
-    parser.print_help()
-    return EXIT_PASS
+    try:
+        handler = _DISPATCH.get(args.command)
+        if handler:
+            return handler(args)
+        return _pending(args.command, _PENDING[args.command])
+    except ConfigError as exc:
+        print(f"{PROG}: {exc.render()}", file=sys.stderr)
+        return EXIT_USAGE
+    except RestverifyError as exc:
+        print(f"{PROG}: {exc.render()}", file=sys.stderr)
+        tail = getattr(exc, "stderr_tail", "")
+        if tail:
+            print(f"  restic said: {tail}", file=sys.stderr)
+        return EXIT_RESTORE_FAIL
+    except KeyboardInterrupt:
+        print(f"\n{PROG}: interrupted.", file=sys.stderr)
+        return EXIT_RESTORE_FAIL
 
 
 if __name__ == "__main__":  # pragma: no cover

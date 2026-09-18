@@ -12,3 +12,9 @@ __version__ = "0.1.0.dev0"
 EXIT_PASS = 0            # restore + verification succeeded
 EXIT_RESTORE_FAIL = 1    # restic could not restore the snapshot
 EXIT_DIFF_MISMATCH = 2   # restored data differs from the source
+
+# Usage-class failures (bad flag, unusable config, missing prerequisite) are NOT
+# verification outcomes, so they must not borrow 1 or 2. 64 is the conventional
+# "usage error" code from sysexits.h. Documented in --help and reported as a
+# deliberate extension of the PDF contract (which only names 0/1/2).
+EXIT_USAGE = 64
