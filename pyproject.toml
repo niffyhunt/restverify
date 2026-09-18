@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "restverify"
+version = "0.1.0.dev0"
+description = "Rehearse and verify restic restores locally, on a schedule, with a diff-proof report."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+restverify = "restverify.cli:main"
+
+[project.optional-dependencies]
+keyring = ["keyring==25.5.0"]
+dev = ["pytest==8.3.4"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/restverify"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
