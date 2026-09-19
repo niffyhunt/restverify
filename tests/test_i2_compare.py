@@ -271,7 +271,8 @@ def test_compare_json_reports_offenders_and_both_digests(
     assert [e["path"] for e in block["errors"]] == ["restored.txt"]
     assert block["errors"][0]["kind"] == "content"
     assert block["digests"]["restored"] != block["digests"]["source"]
-    assert payload["incomplete"] == ["full JSON schema on failure paths (I3)"]
+    assert payload["schema"] == 1                # I3c: schema is on every payload
+    assert "incomplete" not in payload           # the I2 placeholder is gone
 
 
 def test_help_documents_compare_and_strict(capsys):

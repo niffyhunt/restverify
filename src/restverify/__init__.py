@@ -18,3 +18,8 @@ EXIT_DIFF_MISMATCH = 2   # restored data differs from the source
 # "usage error" code from sysexits.h. Documented in --help and reported as a
 # deliberate extension of the PDF contract (which only names 0/1/2).
 EXIT_USAGE = 64
+
+# Public JSON envelope contract (I3c). Every payload emitted by --json carries
+# this number. A breaking shape change increments it; it is never edited
+# silently. The envelope itself is documented in `restverify run --help`.
+SCHEMA_VERSION = 1

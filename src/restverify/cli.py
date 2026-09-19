@@ -15,7 +15,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE, __version__)
+from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE,
+               SCHEMA_VERSION, __version__)
 from . import compare as comparemod
 from . import config as cfgmod
 from . import excludes as excludesmod
@@ -53,6 +54,7 @@ def _error_payload(kind: str, what: str, exit_code: int, command: str = "",
     """The single error envelope (I3a). Uniform on every failure path."""
     return {
         "tool": PROG,
+        "schema": SCHEMA_VERSION,
         "version": __version__,
         "command": command,
         "status": "error",
@@ -100,8 +102,8 @@ exit codes:
 
 run output (this build):
   ✓ restored snapshot <id>: N files / X in Ys; N diffs
-  manifest fields, the symlink policy, the sampling rule and the compare
-  semantics are in `run --help`
+  manifest fields, the symlink policy, the sampling rule, the compare semantics
+  and the JSON envelope ("schema": 1, stdout purity, error kinds) are in `run --help`
 
 sample sha256 (this build):
   {samplingmod.RULE}
@@ -127,8 +129,8 @@ class _Parser(argparse.ArgumentParser):
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true",
-                   help="machine-readable JSON; the compare block completes in I2c, "
-                        "the full schema in I3")
+                   help="machine-readable JSON on stdout (exactly one object; teaching "
+                        "text goes to stderr; the envelope is documented in `run --help`)")
     p.add_argument("--config", metavar="PATH", default=None,
                    help=f"config file to use (default: {cfgmod.default_config_path()})")
 
@@ -189,7 +191,21 @@ def build_parser() -> argparse.ArgumentParser:
                "  this - content outside the sample is not hashed). Not compared:\n"
                "  mtimes and ordering, so those never fail a run. Warned, not failed:\n"
                "  an empty directory present on only one side; --strict promotes that\n"
-               "  warning to exit 2. A missing/unreadable source exits 1 and teaches.\n",
+               "  warning to exit 2. A missing/unreadable source exits 1 and teaches.\n"
+               "\njson envelope (--json):\n"
+               "  stdout carries exactly one JSON object and nothing else in every mode\n"
+               "  (success, --dry-run, --no-source skip, and every failure); teaching text\n"
+               "  and argparse's usage message go to stderr, so `restverify ... --json >\n"
+               "  out.json` is always valid JSON.\n"
+               "  top-level keys: tool, schema, version, command, status, exit_code.\n"
+               "  \"schema\": 1 is the public contract from I3c onward; a breaking change\n"
+               "  increments it rather than editing it silently.\n"
+               "  status: pass | diff_mismatch | dry_run | error. A mismatch is NOT an\n"
+               "  error object: it is status diff_mismatch with exit 2.\n"
+               "  on error, \"error\" carries kind/what/hint/stderr_tail; kind is one of\n"
+               "  usage | config | restic_missing | restic_failed | no_snapshots |\n"
+               "  source | manifest | sample | tempdir | interrupted.\n"
+               "  exit_code mirrors the process exit code (0/1/2/64).\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_run.add_argument("-r", "--repo", metavar="PATH",
                        help="restic repository (or a repo name saved in the config)")
@@ -225,9 +241,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _note_json_deferred(args) -> None:
-    """G6: --json is documented as incomplete (I3) and must not fake a schema."""
+    """G6: this command's --json is deferred (ruling 4) and must not fake a schema.
+
+    `run` is the only JSON surface completed by I3; init/report/cron arrive in
+    their own increments.
+    """
     if getattr(args, "json", False):
-        print(f"{PROG}: --json is not complete until increment I3; "
+        print(f"{PROG}: --json is not implemented for this command yet; "
               "showing the human-readable output instead.", file=sys.stderr)
 
 
@@ -361,10 +381,12 @@ def _restored_root(target, snapshot):
 
 
 def _run_payload(entry, snapshot, man, sample, comparison, root, elapsed, cleaned) -> dict:
-    """R12 + G6: the real fields that exist now, and explicit incompleteness."""
+    """The run envelope. Complete as of I3c: every field is real, and
+    "schema" pins the shape for consumers."""
     code = comparison.exit_code()
     return {
         "tool": PROG,
+        "schema": SCHEMA_VERSION,
         "version": __version__,
         "command": "run",
         "status": "diff_mismatch" if code == EXIT_DIFF_MISMATCH else "pass",
@@ -386,9 +408,6 @@ def _run_payload(entry, snapshot, man, sample, comparison, root, elapsed, cleane
         "sample": sample.to_json(),
         "compare": comparison.to_json(),
         "strict": bool(entry.strict),
-        "incomplete": [
-            "full JSON schema on failure paths (I3)",
-        ],
     }
 
 
@@ -397,6 +416,7 @@ def _dry_run_payload(entry, selector: str) -> dict:
     no fabricated restore data (G6) — it states what *would* happen."""
     return {
         "tool": PROG,
+        "schema": SCHEMA_VERSION,
         "version": __version__,
         "command": "run",
         "status": "dry_run",

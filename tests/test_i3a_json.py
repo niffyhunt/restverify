@@ -197,5 +197,5 @@ def test_init_json_stays_deferred(config_path, capsys):
     code = main(["init", "-r", "/srv/backup", "--json"])
     captured = capsys.readouterr()
     assert code == EXIT_PASS
-    assert "not complete until increment I3" in captured.err
+    assert "not implemented for this command yet" in captured.err
     assert captured.out.lstrip().startswith("\u2713")

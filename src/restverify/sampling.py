@@ -165,7 +165,7 @@ def _file_sha256(path: Path) -> str:
     except OSError as exc:
         raise SampleError(
             f"could not read {path} while hashing it: {exc.strerror or exc}",
-            hint="re-run; if it persists the restore is incomplete",
+            hint="re-run; if it persists the restore did not complete",
         ) from exc
     return digest.hexdigest()
 

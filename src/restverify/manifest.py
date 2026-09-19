@@ -195,7 +195,7 @@ def build(root: Path | str, ignore_top_level: Iterable[str] = (),
                     raise ManifestError(
                         f"could not read the symlink {child.path}: "
                         f"{exc.strerror or exc}",
-                        hint="re-run; if it persists the restore is incomplete",
+                        hint="re-run; if it persists the restore did not complete",
                     ) from exc
                 result.entries.append(
                     Entry(path=rel, kind=KIND_SYMLINK, size=0, link_target=target))
@@ -211,7 +211,7 @@ def build(root: Path | str, ignore_top_level: Iterable[str] = (),
                 except OSError as exc:
                     raise ManifestError(
                         f"could not stat {child.path}: {exc.strerror or exc}",
-                        hint="re-run; if it persists the restore is incomplete",
+                        hint="re-run; if it persists the restore did not complete",
                     ) from exc
                 result.entries.append(Entry(path=rel, kind=KIND_FILE, size=size))
                 stat = result.directories[rel_dir]

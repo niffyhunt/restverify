@@ -3,7 +3,7 @@
 The manifest is the evidence that a restore landed something. These tests pin
 exact numbers on a planted tree, the symlink policy (recorded, never followed),
 deep-nesting behaviour, the empty-tree case, the metadata-only guarantee, and
-the honesty marker on --json (compare is labelled incomplete; gate G6).
+the honesty marker on --json (schema 1, no placeholder fields; gate G6).
 """
 import json
 import os
@@ -211,13 +211,14 @@ def test_run_human_line_reports_counts_and_size(fake_restic, tmp_base, config_pa
     assert "arrive in increment I2" not in out
 
 
-def test_json_run_emits_manifest_and_labels_compare_incomplete(
+def test_json_run_emits_manifest_compare_and_schema(
         fake_restic, tmp_base, config_path, capsys):
     code = main(["run", "-r", "/srv/backup", "--json"])
     captured = capsys.readouterr()
     assert code == EXIT_PASS
     payload = json.loads(captured.out)          # stdout must be pure JSON
     assert payload["status"] == "pass" and payload["exit_code"] == EXIT_PASS
+    assert payload["schema"] == 1               # I3c: no placeholder payloads
     man = payload["manifest"]
     assert man["file_count"] == 2
     assert man["total_bytes"] == 1505
@@ -234,10 +235,10 @@ def test_json_run_emits_manifest_and_labels_compare_incomplete(
     assert payload["compare"]["status"] == "skipped"
     assert payload["compare"]["reason"] == "no source saved"
     assert payload["status"] == "pass"
-    assert payload["incomplete"] == ["full JSON schema on failure paths (I3)"]
+    assert "incomplete" not in payload           # the I2 label died at I3c
     assert payload["restore"]["target_removed"] is True
     assert list(Path(tmp_base).iterdir()) == []
-    assert "not complete until increment I3" not in captured.err
+    assert "not implemented for this command yet" not in captured.err
 
 
 @pytest.mark.parametrize("count,expected", [
