@@ -23,7 +23,7 @@ from . import manifest as manifestmod
 from . import restic as resticmod
 from . import sampling as samplingmod
 from . import tempstore
-from .errors import ConfigError, RestverifyError, kind_of
+from .errors import (CODE_BY_KIND, ConfigError, RestverifyError, exit_code_for, kind_of)
 
 PROG = "restverify"
 DIFF_DISPLAY_LIMIT = 10
@@ -119,10 +119,10 @@ class _Parser(argparse.ArgumentParser):
         self.print_usage(sys.stderr)
         print(f"{PROG}: error: {message}", file=sys.stderr)
         print(f"  next: {PROG} --help", file=sys.stderr)
-        _emit_error("usage", message, EXIT_USAGE,
+        _emit_error("usage", message, CODE_BY_KIND["usage"],
                     command=_command_from_argv(_RAW_ARGV),
                     hint=f"{PROG} --help")
-        raise SystemExit(EXIT_USAGE)
+        raise SystemExit(CODE_BY_KIND["usage"])
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -526,9 +526,9 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         print(f"\n{PROG}: interrupted.", file=sys.stderr)
         _emit_error("interrupted", "interrupted before the command started.",
-                    EXIT_RESTORE_FAIL, command=_command_from_argv(raw),
+                    CODE_BY_KIND["interrupted"], command=_command_from_argv(raw),
                     hint="re-run when ready; nothing was left behind")
-        return EXIT_RESTORE_FAIL
+        return CODE_BY_KIND["interrupted"]
     if not args.command:
         parser.print_help()
         return EXIT_PASS
@@ -539,23 +539,25 @@ def main(argv=None) -> int:
         return _pending(args.command, _PENDING[args.command])
     except ConfigError as exc:
         print(f"{PROG}: {exc.render()}", file=sys.stderr)
-        _emit_error(kind_of(exc), exc.what, EXIT_USAGE, command=args.command,
+        code = exit_code_for(exc)
+        _emit_error(kind_of(exc), exc.what, code, command=args.command,
                     hint=exc.hint)
-        return EXIT_USAGE
+        return code
     except RestverifyError as exc:
         print(f"{PROG}: {exc.render()}", file=sys.stderr)
         tail = getattr(exc, "stderr_tail", "")
         if tail:
             print(f"  restic said: {tail}", file=sys.stderr)
-        _emit_error(kind_of(exc), exc.what, EXIT_RESTORE_FAIL, command=args.command,
+        code = exit_code_for(exc)
+        _emit_error(kind_of(exc), exc.what, code, command=args.command,
                     hint=exc.hint, stderr_tail=tail or None)
-        return EXIT_RESTORE_FAIL
+        return code
     except KeyboardInterrupt:
         print(f"\n{PROG}: interrupted.", file=sys.stderr)
         _emit_error("interrupted", "interrupted before the run finished.",
-                    EXIT_RESTORE_FAIL, command=args.command,
+                    CODE_BY_KIND["interrupted"], command=args.command,
                     hint="re-run when ready; nothing was left behind")
-        return EXIT_RESTORE_FAIL
+        return CODE_BY_KIND["interrupted"]
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -105,3 +105,66 @@ def kind_of(exc: BaseException) -> str:
     a value outside ``ERROR_KINDS`` (see FALLBACK_KIND)."""
     kind = getattr(exc, "kind", FALLBACK_KIND)
     return kind if kind in ERROR_KINDS else FALLBACK_KIND
+
+
+# ── the exit-code map (I3b) ────────────────────────────────────────────────
+#
+# ONE table, consulted by every error path in the CLI. Every concrete
+# RestverifyError subclass must appear here with its OWN key: a new subclass
+# without an entry fails the exhaustive taxonomy test, which is what stops G2
+# rotting as I4-I6 add error types. Subclassing a mapped class does not count
+# as mapping it.
+from . import EXIT_RESTORE_FAIL, EXIT_USAGE  # noqa: E402  (package constants)
+
+CODE_BY_ERROR = {
+    ResticMissing: EXIT_RESTORE_FAIL,
+    ResticFailed: EXIT_RESTORE_FAIL,
+    NoSnapshots: EXIT_RESTORE_FAIL,
+    ConfigError: EXIT_USAGE,
+    TempDirError: EXIT_RESTORE_FAIL,
+    ManifestError: EXIT_RESTORE_FAIL,
+    SampleError: EXIT_RESTORE_FAIL,
+    SourceError: EXIT_RESTORE_FAIL,
+}
+
+# Kinds that have no exception class of their own: "usage" is raised by the
+# argparse subclass, "interrupted" is a KeyboardInterrupt.
+CODE_BY_KIND = {
+    "usage": EXIT_USAGE,
+    "interrupted": EXIT_RESTORE_FAIL,
+}
+
+# kind -> exit code, for every member of the closed vocabulary. I3c's contract
+# test asserts that its keys are exactly ERROR_KINDS.
+EXIT_CODE_BY_KIND = {klass.kind: code for klass, code in CODE_BY_ERROR.items()}
+EXIT_CODE_BY_KIND.update(CODE_BY_KIND)
+
+# Defensive only: an unmapped class must never traceback (U4). The taxonomy
+# test makes this unreachable while it is green.
+FALLBACK_EXIT_CODE = EXIT_RESTORE_FAIL
+
+
+def error_classes() -> set[type]:
+    """Every concrete RestverifyError subclass, however deeply nested."""
+    found: set[type] = set()
+
+    def walk(cls):
+        for sub in cls.__subclasses__():
+            found.add(sub)
+            walk(sub)
+
+    walk(RestverifyError)
+    return found
+
+
+def exit_code_for(exc: BaseException) -> int:
+    """The contract exit code for an exception.
+
+    Walks the MRO so a subclass of a mapped class inherits its parent's code at
+    runtime, but the exhaustive test still demands an explicit entry for every
+    concrete class. Never raises.
+    """
+    for klass in type(exc).__mro__:
+        if klass in CODE_BY_ERROR:
+            return CODE_BY_ERROR[klass]
+    return FALLBACK_EXIT_CODE
