@@ -8,13 +8,16 @@ U2: failures teach — nothing here lets a bare traceback reach the user.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
 import time
+from pathlib import Path
 
 from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE, __version__)
 from . import config as cfgmod
+from . import manifest as manifestmod
 from . import restic as resticmod
 from . import tempstore
 from .errors import ConfigError, RestverifyError
@@ -41,6 +44,11 @@ exit codes:
   2   restored data differs from the source
   64  usage problem (bad flag, unusable config) — never a verification outcome
 
+run output (this build):
+  ✓ restored snapshot <id>: N files / X in Ys
+  manifest fields, the symlink policy and the sampling rule are in `run --help`
+  the source comparison (and its diff count) lands in increment I2c
+
 next: run `restverify run -r <repo>` to verify your first snapshot
 """
 
@@ -57,7 +65,8 @@ class _Parser(argparse.ArgumentParser):
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true",
-                   help="machine-readable output (complete in increment I3)")
+                   help="machine-readable JSON; the sample hash completes in I2b, "
+                        "the compare block in I2c, the full schema in I3")
     p.add_argument("--config", metavar="PATH", default=None,
                    help=f"config file to use (default: {cfgmod.default_config_path()})")
 
@@ -94,7 +103,15 @@ def build_parser() -> argparse.ArgumentParser:
                     "to your source paths.",
         epilog="examples:\n  restverify run -r /srv/backup\n"
                "  restverify run -r /srv/backup --dry-run\n  restverify run --no-source\n"
-               "  restverify run -r /srv/backup -s /srv/data --strict",
+               "  restverify run -r /srv/backup -s /srv/data --strict\n"
+               "\nmanifest (this build):\n"
+               "  after the restore, restverify walks the restored tree and reports the\n"
+               "  file count, byte totals, a per-directory roll-up (direct + recursive),\n"
+               "  the deepest directory seen, and how many symlinks were recorded.\n"
+               "  symlinks: recorded with their target, never followed (following one\n"
+               "  could read outside the restore target); a symlinked directory is one\n"
+               "  link entry, not a subtree. No depth limit is imposed by restverify.\n"
+               "  contents are not read in this build - the sampled sha256 is I2b.\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_run.add_argument("-r", "--repo", metavar="PATH",
                        help="restic repository (or a repo name saved in the config)")
@@ -105,7 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--no-source", action="store_true",
                        help="verify the restore completes without comparing to a source")
     p_run.add_argument("--strict", action="store_true",
-                       help="tighten comparison: fail on any count or hash difference")
+                       help="tighten comparison (parsed now; enforced when the "
+                            "comparison lands in increment I2c)")
     p_run.add_argument("--snapshot", metavar="SELECTOR", default=None,
                        help="snapshot to verify: 'latest' (default) or a short id")
     _add_common(p_run)
@@ -222,8 +240,74 @@ def _resolve_entry(args, config):
     return entry
 
 
+def human_bytes(count: int) -> str:
+    """Binary units with one decimal, matching restic's own reporting."""
+    if count < 1024:
+        return f"{count} B"
+    value = float(count)
+    for unit in ("KiB", "MiB", "GiB", "TiB", "PiB"):
+        value /= 1024.0
+        if value < 1024 or unit == "PiB":
+            return f"{value:.1f} {unit}"
+    return f"{count} B"  # pragma: no cover - the loop always returns
+
+
+def _restored_root(target, snapshot):
+    """Locate the subtree the snapshot's own paths restored into (B1 assumption).
+
+    `restic restore <id> --target <dir>` recreates the snapshot's absolute
+    paths *under* the target, so a source comparison needs that subtree, not
+    the target itself. Any candidate that resolves outside the target is
+    refused: repository metadata must not be able to aim our walk at arbitrary
+    filesystem paths.
+    """
+    base = Path(target).resolve()
+    for raw in snapshot.paths or []:
+        candidate = Path(target) / str(raw).lstrip("/")
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(base)
+        except (OSError, ValueError):
+            continue
+        if resolved.is_dir():
+            return resolved
+    return Path(target)
+
+
+def _run_payload(entry, snapshot, man, root, elapsed, cleaned) -> dict:
+    """R12 + G6: the real fields that exist now, and explicit incompleteness."""
+    return {
+        "tool": PROG,
+        "version": __version__,
+        "command": "run",
+        "status": "pass",
+        "exit_code": EXIT_PASS,
+        "snapshot": {
+            "id": snapshot.id,
+            "short_id": snapshot.short_id,
+            "time": snapshot.time,
+            "paths": snapshot.paths,
+        },
+        "restore": {
+            "repo": entry.repo,
+            "target": str(root),
+            "target_removed": bool(cleaned),
+            "excludes": list(entry.excludes),
+            "elapsed_seconds": elapsed,
+        },
+        "manifest": man.to_json(),
+        "sample": {"implemented": False, "lands_in": "I2b"},
+        "compare": {"implemented": False, "lands_in": "I2c"},
+        "strict": bool(entry.strict),
+        "incomplete": [
+            "sample sha256 (I2b)",
+            "source comparison (I2c)",
+            "full JSON schema (I3)",
+        ],
+    }
+
+
 def _cmd_run(args) -> int:
-    _note_json_deferred(args)
     config = cfgmod.load_config(args.config)
     entry = _resolve_entry(args, config)
 
@@ -242,6 +326,9 @@ def _cmd_run(args) -> int:
         print(f"  compare  : {'off (--no-source)' if entry.no_source or not entry.source else 'on'}")
         print(f"  excludes : {', '.join(entry.excludes) if entry.excludes else '(none)'}")
         print(f"  temp dir : a fresh private dir under {tempstore.base_dir()}, removed afterwards")
+        print("  manifest : file count, byte totals and a per-directory roll-up (this build)")
+        print("  sample   : deterministic sha256 digest of the sampled files (I2b)")
+        print("  compare  : excludes-aware source comparison (I2c)")
         print("✓ PASS (dry run) — nothing was restored, nothing was written")
         return EXIT_PASS
 
@@ -250,9 +337,28 @@ def _cmd_run(args) -> int:
     with tempstore.restore_dir(entry.repo) as target:
         resticmod.restore(entry.repo, snapshot, target,
                           excludes=entry.excludes, password_command=password_command)
+        restore_root = _restored_root(target, snapshot)
+        man = manifestmod.build(restore_root, ignore_top_level=(tempstore.MARKER,))
+        cleaned = tempstore.cleanup(target)
     elapsed = int(time.time() - started)
-    print(f"✓ restored snapshot {snapshot.short_id} in {elapsed}s; temp dir cleaned up")
-    print("  note: file counts and the source comparison arrive in increment I2")
+
+    if args.json:
+        print(json.dumps(_run_payload(entry, snapshot, man, restore_root, elapsed, cleaned),
+                         indent=2, ensure_ascii=False))
+        return EXIT_PASS
+
+    size = human_bytes(man.total_bytes)
+    print(f"✓ restored snapshot {snapshot.short_id}: {man.file_count} files / "
+          f"{size} in {elapsed}s")
+    print(f"  manifest : {man.file_count} files, {size}, {man.directory_count} dirs, "
+          f"max depth {man.max_depth}, {man.symlink_count} symlink(s) "
+          f"({manifestmod.SYMLINK_POLICY}), {len(man.ignored)} tempstore file(s) ignored")
+    print("  sample   : deterministic sha256 digest of the sampled files (I2b)")
+    print("  compare  : excludes-aware source comparison (I2c)")
+    if entry.strict:
+        print("  note     : --strict has no effect until the comparison lands (I2c)")
+    if not cleaned:
+        print(f"  warning  : the temp restore dir at {restore_root} could not be removed")
     return EXIT_PASS
 
 

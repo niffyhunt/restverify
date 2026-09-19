@@ -41,3 +41,7 @@ class ConfigError(RestverifyError):
 
 class TempDirError(RestverifyError):
     """The restore directory could not be created (permissions, full disk)."""
+
+
+class ManifestError(RestverifyError):
+    """The restored tree could not be walked (permissions, vanished entry)."""

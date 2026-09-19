@@ -50,9 +50,17 @@ if verb == "snapshots":
 
 if verb == "restore":
     target = args[args.index("--target") + 1]
-    os.makedirs(target, exist_ok=True)
-    with open(os.path.join(target, "restored.txt"), "w", encoding="utf-8") as fh:
-        fh.write("hello")
+    files = {
+        "restored.txt": b"hello",
+        "sub/nested.bin": b"\\0" * 1500,
+    }
+    for rel, blob in files.items():
+        path = os.path.join(target, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(blob)
+    os.makedirs(os.path.join(target, "empty-dir"), exist_ok=True)
+    os.symlink("restored.txt", os.path.join(target, "link"))
     if mode == "fail_restore":
         print("Fatal: unable to load snapshot 9f3a2c00", file=sys.stderr)
         sys.exit(3)
