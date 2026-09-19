@@ -6,8 +6,9 @@ in one cron-style test (gate G2). The source is proven untouched.
 
 Test-only helper: `fingerprint()` is deliberately **not** a product API. It exists
 so `test_source_is_never_written_to` can prove (size + mtime_ns + sha256) that the
-source tree is untouched; it is evidence for R26/R23 and is accounted for in
-`docs/PHASE2-PLAN.md` under "Recorded extras (G5 hygiene)" as X2, not as a plan row.
+source tree is untouched; it is evidence for R26/R23 and is named in
+`docs/PHASE2-PLAN.md` under "Test infrastructure" (test-only helpers carry no
+requirement id; shipped helpers do — e.g. R29 for `cli.human_bytes()`).
 """
 import hashlib
 import json

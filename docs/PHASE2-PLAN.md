@@ -44,6 +44,7 @@ Scaffolding + test infrastructure only may precede the GO gate below.
 | R26 | Never writes to sources; `--strict` is the explicit compare | source paths opened read-only; `--strict` only tightens comparison |
 | R27 | `restic` binary is a documented prerequisite | missing restic → teaching error (U2), never a traceback |
 | R28 | Pinned, signed releases | release process doc; pinned dev deps |
+| R29 | Human-readable byte totals (`cli.human_bytes()`, binary units, one decimal) | formatting asserted by a parametrised unit test; consumed by the run/demo line (R22) and the I4 `report` |
 
 ### Negative requirements — PRODUCT 1 (PDF line 63)
 
@@ -144,7 +145,7 @@ G5 (diff ↔ requirement numbers), G6 (honest status).
 | I | Scope | Extra gate beyond the standing five |
 |---|---|---|
 | I1 | config/contract + restore-to-temp + cleanup-on-exit (R1,R2,R3,R5,R7,R16,R17,R23,R24,R27,N1,N2,N6) | adversarial: missing `restic`, empty repo, permission-denied temp dir; `kill -9` cleanup proof |
-| I2 | manifest + sample sha256 + excludes-aware source compare (R4,R8,R9,R26) | N-diffs == 0 on an identical tree; a single-byte change is detected |
+| I2 | manifest + sample sha256 + excludes-aware source compare (R4,R8,R9,R26,R29) | N-diffs == 0 on an identical tree; a single-byte change is detected |
 | I3 | error handling + exit codes + `--json` `--dry-run` `--no-source` (R11,R12,R13,R14) | **G2 fully**: all three codes asserted; JSON valid on both success and failure |
 | I4 | SQLite run history + `report` (R10) | trend renders; last failure reason in plain language; history survives restart |
 | I5 | CLI surface + `cron` printer (R15,R22) | demo line matches the PDF shape within tolerance; `cron` installs nothing |
@@ -155,20 +156,27 @@ Usability focus carried through: `init` walks the user interactively with sane
 defaults; the first `run` prints the PASS line even under `--dry-run`; `report`
 shows the trend with the last failure explained in plain language.
 
-### Recorded extras (G5 hygiene — closed 2026-09-19 after the I2 briefing)
+### Test infrastructure (recorded 2026-09-19, closing the I2 G5 PARTIAL)
 
-The I2 briefing (§6) recorded G5 as **PARTIAL** because two artefacts carried no
-requirement id. Resolved rather than carried forward:
+Test infrastructure is code under `tests/` that never ships. It carries **no
+requirement id by design**; the rule that keeps G5 meaningful is the opposite one
+for shipped code:
 
-| id | artefact | why it exists | accounted as |
-|---|---|---|---|
-| X1 | `cli.human_bytes()` (binary units, one decimal) | user-visible byte totals must render stably in the run line and in the future `report` | a **plan row**: it is required output formatting under R8 (byte totals) and R22 (demo shape); owner increments I2 (added), I4/I5 (consumers) |
-| X2 | `tests/test_i2_compare.py::fingerprint()` | proves the source tree is never written to (size + mtime_ns + sha256 before/after) | **not** a plan row by design: test-only helper, not shipped code; it is evidence for R26/R23 and is documented in that test module's docstring |
+> Any new *shipped* helper that no requirement id covers must either gain a
+> requirement row in the same commit that introduces it, or not ship.
+> Test-only helpers are exempt, but every non-obvious one must be named in this
+> section and explained in the docstring of the module that holds it.
 
-**Standing rule from this point:** any new *shipped* helper that no requirement id
-covers must either gain a row in this table in the same commit that introduces it,
-or not ship. Test-only helpers are exempt but must be named as such in the test
-module's docstring (as X2 is).
+| test infrastructure | why it exists | where it is documented |
+|---|---|---|
+| `tests/conftest.py` fake-restic harness (`FAKE_RESTIC`, `FAKE_FILES`/`FAKE_DIRS`/`FAKE_LINKS`, `plant_fake_tree`, `source_tree`, `tmp_base`, `config_path`) | the entire suite is deterministic and offline because a fake `restic` is put on `PATH` (B1: no real restic on the build box); `plant_fake_tree`/`source_tree` let a test plant a byte-identical source tree on purpose | module docstring + the I2/I1 briefings |
+| `tests/test_i2_compare.py::fingerprint()` | proves the source tree is never written to (size + mtime_ns + sha256 before/after) — evidence for R26/R23 | that module's docstring |
+| `tests/test_i2_manifest.py::test_human_bytes_units` | the R29 formatter's contract test (6 parametrised cases) | test docstring names R29 |
+
+Worked example of the shipped-code rule: `cli.human_bytes()` arrived as an
+unplanned extra during I2 and was **numbered R29** (added to the requirement
+table and to the I2 row) when the G5 PARTIAL was closed — it is user-visible
+output formatting, so it could not stay uncatalogued.
 
 ### PRODUCT 2 — haccheck (PDF D1–D7 → I1–I7) — starts only after Product 1 ships
 

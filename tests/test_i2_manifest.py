@@ -245,4 +245,5 @@ def test_json_run_emits_manifest_and_labels_compare_incomplete(
     (1024 ** 2, "1.0 MiB"), (1024 ** 3, "1.0 GiB"),
 ])
 def test_human_bytes_units(count, expected):
+    """R29: the byte-total format is contract, not incidental."""
     assert human_bytes(count) == expected

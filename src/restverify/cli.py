@@ -267,7 +267,14 @@ def _resolve_entry(args, config):
 
 
 def human_bytes(count: int) -> str:
-    """Binary units with one decimal, matching restic's own reporting."""
+    """R29: byte totals as binary units with one decimal (e.g. ``1.5 KiB``).
+
+    The run line (R8 byte totals / R22 demo shape) and the I4 ``report`` both
+    render totals through this function, so the format is contract, not
+    incidental: bytes below 1024 print as ``N B``; above that the value is
+    divided by 1024 per unit and printed with exactly one decimal in
+    KiB/MiB/GiB/TiB/PiB.
+    """
     if count < 1024:
         return f"{count} B"
     value = float(count)
