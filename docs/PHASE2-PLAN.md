@@ -155,6 +155,21 @@ Usability focus carried through: `init` walks the user interactively with sane
 defaults; the first `run` prints the PASS line even under `--dry-run`; `report`
 shows the trend with the last failure explained in plain language.
 
+### Recorded extras (G5 hygiene — closed 2026-09-19 after the I2 briefing)
+
+The I2 briefing (§6) recorded G5 as **PARTIAL** because two artefacts carried no
+requirement id. Resolved rather than carried forward:
+
+| id | artefact | why it exists | accounted as |
+|---|---|---|---|
+| X1 | `cli.human_bytes()` (binary units, one decimal) | user-visible byte totals must render stably in the run line and in the future `report` | a **plan row**: it is required output formatting under R8 (byte totals) and R22 (demo shape); owner increments I2 (added), I4/I5 (consumers) |
+| X2 | `tests/test_i2_compare.py::fingerprint()` | proves the source tree is never written to (size + mtime_ns + sha256 before/after) | **not** a plan row by design: test-only helper, not shipped code; it is evidence for R26/R23 and is documented in that test module's docstring |
+
+**Standing rule from this point:** any new *shipped* helper that no requirement id
+covers must either gain a row in this table in the same commit that introduces it,
+or not ship. Test-only helpers are exempt but must be named as such in the test
+module's docstring (as X2 is).
+
 ### PRODUCT 2 — haccheck (PDF D1–D7 → I1–I7) — starts only after Product 1 ships
 
 | I | Scope | Extra gate |

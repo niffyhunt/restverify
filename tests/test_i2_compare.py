@@ -3,6 +3,11 @@
 A clean tree exits 0; any data difference exits 2 and names the offender; a
 broken source teaches and exits 1; a bad flag is 64. All four codes are asserted
 in one cron-style test (gate G2). The source is proven untouched.
+
+Test-only helper: `fingerprint()` is deliberately **not** a product API. It exists
+so `test_source_is_never_written_to` can prove (size + mtime_ns + sha256) that the
+source tree is untouched; it is evidence for R26/R23 and is accounted for in
+`docs/PHASE2-PLAN.md` under "Recorded extras (G5 hygiene)" as X2, not as a plan row.
 """
 import hashlib
 import json
