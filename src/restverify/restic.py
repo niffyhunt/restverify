@@ -16,7 +16,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
-from .errors import ResticFailed, ResticMissing
+from .errors import NoSnapshots, ResticFailed, ResticMissing
 
 # Verbs that only read. Everything restverify ships must be one of these.
 READONLY_VERBS = frozenset({"snapshots", "restore", "ls", "cat", "find",
@@ -138,7 +138,7 @@ def newest_snapshot(repo: str, password_command: str | None = None,
     """R5: 'latest' is the default; an explicit id/short-id/tag also works."""
     snaps = list_snapshots(repo, password_command)
     if not snaps:
-        raise ResticFailed(
+        raise NoSnapshots(
             f"no snapshots found in {repo}, so there is nothing to verify yet.",
             hint="take a backup first (`restic -r <repo> backup <path>`), then re-run",
         )
@@ -146,7 +146,7 @@ def newest_snapshot(repo: str, password_command: str | None = None,
         for snap in snaps:
             if snap.id == selector or snap.short_id == selector:
                 return snap
-        raise ResticFailed(
+        raise NoSnapshots(
             f"no snapshot in {repo} matches {selector!r}.",
             hint="list them with `restic -r <repo> snapshots` and use the short id",
         )

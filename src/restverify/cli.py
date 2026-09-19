@@ -23,10 +23,60 @@ from . import manifest as manifestmod
 from . import restic as resticmod
 from . import sampling as samplingmod
 from . import tempstore
-from .errors import ConfigError, RestverifyError
+from .errors import ConfigError, RestverifyError, kind_of
 
 PROG = "restverify"
 DIFF_DISPLAY_LIMIT = 10
+
+# Both are set by main() from the raw argv BEFORE argparse runs (I3 ruling 2).
+# The scan decides output format only: no other flag is interpreted before
+# argparse, and _RAW_ARGV exists solely so a usage error can name its command.
+_JSON_MODE = False
+_RAW_ARGV: list[str] = []
+_KNOWN_COMMANDS = ("init", "run", "report", "cron")
+
+
+def _wants_json(argv) -> bool:
+    """Ruling 2: look for the literal --json token in raw argv, nothing else."""
+    return "--json" in argv
+
+
+def _command_from_argv(argv) -> str:
+    for token in argv:
+        if token in _KNOWN_COMMANDS:
+            return token
+    return ""
+
+
+def _error_payload(kind: str, what: str, exit_code: int, command: str = "",
+                   hint: str | None = None, stderr_tail: str | None = None) -> dict:
+    """The single error envelope (I3a). Uniform on every failure path."""
+    return {
+        "tool": PROG,
+        "version": __version__,
+        "command": command,
+        "status": "error",
+        "exit_code": exit_code,
+        "error": {
+            "kind": kind,
+            "what": what,
+            "hint": hint or None,
+            "stderr_tail": stderr_tail or None,
+        },
+    }
+
+
+def _emit_json(payload: dict) -> None:
+    """stdout carries exactly this object and nothing else (ruling 1)."""
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _emit_error(kind: str, what: str, exit_code: int, command: str = "",
+                hint: str | None = None, stderr_tail: str | None = None) -> None:
+    """Emit the error envelope when --json was requested; the teaching text is
+    always written to stderr separately, never into the JSON stream."""
+    if _JSON_MODE:
+        _emit_json(_error_payload(kind, what, exit_code, command, hint, stderr_tail))
 
 DESCRIPTION = (
     "Rehearse and verify restic restores locally, on a schedule, with a "
@@ -69,6 +119,9 @@ class _Parser(argparse.ArgumentParser):
         self.print_usage(sys.stderr)
         print(f"{PROG}: error: {message}", file=sys.stderr)
         print(f"  next: {PROG} --help", file=sys.stderr)
+        _emit_error("usage", message, EXIT_USAGE,
+                    command=_command_from_argv(_RAW_ARGV),
+                    hint=f"{PROG} --help")
         raise SystemExit(EXIT_USAGE)
 
 
@@ -339,6 +392,28 @@ def _run_payload(entry, snapshot, man, sample, comparison, root, elapsed, cleane
     }
 
 
+def _dry_run_payload(entry, selector: str) -> dict:
+    """The --dry-run envelope: same top-level keys as every other payload, and
+    no fabricated restore data (G6) — it states what *would* happen."""
+    return {
+        "tool": PROG,
+        "version": __version__,
+        "command": "run",
+        "status": "dry_run",
+        "exit_code": EXIT_PASS,
+        "dry_run": {
+            "repo": entry.repo,
+            "snapshot": selector,
+            "source": entry.source,
+            "compare": bool(entry.source) and not entry.no_source,
+            "excludes": list(entry.excludes),
+            "restores_anything": False,
+            "restic_invoked": False,
+            "temp_dir": f"a fresh private dir under {tempstore.base_dir()}, removed afterwards",
+        },
+    }
+
+
 def _cmd_run(args) -> int:
     config = cfgmod.load_config(args.config)
     entry = _resolve_entry(args, config)
@@ -351,6 +426,9 @@ def _cmd_run(args) -> int:
     password_command = entry.password_command or os.environ.get("RESTIC_PASSWORD_COMMAND")
 
     if args.dry_run:
+        if _JSON_MODE:
+            _emit_json(_dry_run_payload(entry, selector))
+            return EXIT_PASS
         print("dry run — nothing will be restored")
         print(f"  repo     : {entry.repo}")
         print(f"  snapshot : {selector}")
@@ -437,8 +515,20 @@ _PENDING = {"report": "I4", "cron": "I5"}
 
 
 def main(argv=None) -> int:
+    global _JSON_MODE, _RAW_ARGV
+    raw = list(sys.argv[1:] if argv is None else argv)
+    _JSON_MODE = _wants_json(raw)      # ruling 2: format decision only
+    _RAW_ARGV = raw
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(raw)
+    except KeyboardInterrupt:
+        print(f"\n{PROG}: interrupted.", file=sys.stderr)
+        _emit_error("interrupted", "interrupted before the command started.",
+                    EXIT_RESTORE_FAIL, command=_command_from_argv(raw),
+                    hint="re-run when ready; nothing was left behind")
+        return EXIT_RESTORE_FAIL
     if not args.command:
         parser.print_help()
         return EXIT_PASS
@@ -449,15 +539,22 @@ def main(argv=None) -> int:
         return _pending(args.command, _PENDING[args.command])
     except ConfigError as exc:
         print(f"{PROG}: {exc.render()}", file=sys.stderr)
+        _emit_error(kind_of(exc), exc.what, EXIT_USAGE, command=args.command,
+                    hint=exc.hint)
         return EXIT_USAGE
     except RestverifyError as exc:
         print(f"{PROG}: {exc.render()}", file=sys.stderr)
         tail = getattr(exc, "stderr_tail", "")
         if tail:
             print(f"  restic said: {tail}", file=sys.stderr)
+        _emit_error(kind_of(exc), exc.what, EXIT_RESTORE_FAIL, command=args.command,
+                    hint=exc.hint, stderr_tail=tail or None)
         return EXIT_RESTORE_FAIL
     except KeyboardInterrupt:
         print(f"\n{PROG}: interrupted.", file=sys.stderr)
+        _emit_error("interrupted", "interrupted before the run finished.",
+                    EXIT_RESTORE_FAIL, command=args.command,
+                    hint="re-run when ready; nothing was left behind")
         return EXIT_RESTORE_FAIL
 
 
