@@ -228,9 +228,13 @@ def test_json_run_emits_manifest_and_labels_compare_incomplete(
     assert payload["sample"]["algorithm"] == "sha256"
     assert payload["sample"]["digest"].startswith("sha256:")
     assert payload["sample"]["sampled_files"] == 2
-    assert payload["compare"] == {"implemented": False, "lands_in": "I2c"}
-    assert payload["incomplete"] == ["source comparison (I2c)",
-                                     "full JSON schema (I3)"]
+    # no source is configured in this test, so the compare block is a real
+    # skipped block, not a placeholder (I2c)
+    assert payload["compare"]["implemented"] is True
+    assert payload["compare"]["status"] == "skipped"
+    assert payload["compare"]["reason"] == "no source saved"
+    assert payload["status"] == "pass"
+    assert payload["incomplete"] == ["full JSON schema on failure paths (I3)"]
     assert payload["restore"]["target_removed"] is True
     assert list(Path(tmp_base).iterdir()) == []
     assert "not complete until increment I3" not in captured.err

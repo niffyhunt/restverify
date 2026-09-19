@@ -65,6 +65,7 @@ class Manifest:
     directories: dict[str, DirStat] = field(default_factory=dict)
     max_depth: int = 0
     ignored: list[str] = field(default_factory=list)   # top-level names we own
+    excluded: list[str] = field(default_factory=list)  # paths the excludes pruned
 
     @property
     def file_count(self) -> int:
@@ -132,19 +133,25 @@ class Manifest:
             "directories": self.directory_rollup(),
             "largest_file": largest.to_json() if largest else None,
             "ignored": list(self.ignored),
+            "excluded": list(self.excluded),
         }
 
 
 
-def build(root: Path | str, ignore_top_level: Iterable[str] = ()) -> Manifest:
+def build(root: Path | str, ignore_top_level: Iterable[str] = (),
+          exclude=None) -> Manifest:
     """Walk ``root`` and record every file, symlink and special entry.
 
     Never follows a symlink and never reads file contents. ``ignore_top_level``
     names entries restverify itself owns in the restore dir (the tempstore
     marker); they are skipped **by name at the top level only** and listed in
-    ``manifest.ignored``, so the skip is visible rather than silent. Raises
-    ``ManifestError`` (a teaching error) if the tree itself or any directory
-    becomes unreadable, so a partial walk can never masquerade as a clean one.
+    ``manifest.ignored``, so the skip is visible rather than silent.
+    ``exclude`` is an excludes.ExcludeMatcher; matching entries are skipped and
+    matching directories are **not descended into** (so an excluded directory
+    prunes the same subtree restic pruned), recorded in ``manifest.excluded``.
+    Raises ``ManifestError`` (a teaching error) if the tree itself or any
+    directory becomes unreadable, so a partial walk can never masquerade as a
+    clean one.
     """
     base = Path(root)
     if not base.is_dir():
@@ -178,6 +185,9 @@ def build(root: Path | str, ignore_top_level: Iterable[str] = ()) -> Manifest:
             if not rel_dir and child.name in ignored_names:
                 result.ignored.append(rel)
                 continue
+            if exclude is not None and exclude.matches(rel):
+                result.excluded.append(rel)
+                continue      # matching directories are pruned, not descended
             if child.is_symlink():
                 try:
                     target = os.readlink(child.path)

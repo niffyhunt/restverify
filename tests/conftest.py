@@ -9,8 +9,10 @@ mutate anything (N1/N2).
 Implementation note: the fake uses print() rather than embedding newline
 escapes, so the generated script cannot rot from double-escaping.
 """
+import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -18,11 +20,24 @@ SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+# The tree the fake restic restores. Tests that exercise the source comparison
+# plant the same bytes (plant_fake_tree / source_tree) so "identical" really is
+# identical and any difference a test introduces is the only difference.
+FAKE_FILES = {"restored.txt": b"hello", "sub/nested.bin": b"\0" * 1500}
+FAKE_DIRS = ("empty-dir",)
+FAKE_LINKS = {"link": "restored.txt"}
+FAKE_TREE_JSON = json.dumps({
+    "files": {rel: blob.hex() for rel, blob in FAKE_FILES.items()},
+    "dirs": list(FAKE_DIRS),
+    "links": dict(FAKE_LINKS),
+})
+
 FAKE_RESTIC = '''#!/usr/bin/env python3
 import json, os, sys
 
 LOG = os.environ.get("FAKE_RESTIC_LOG")
 mode = os.environ.get("FAKE_RESTIC_MODE", "ok")
+TREE = __FAKE_TREE__
 args = sys.argv[1:]
 if LOG:
     with open(LOG, "a", encoding="utf-8") as fh:
@@ -50,17 +65,15 @@ if verb == "snapshots":
 
 if verb == "restore":
     target = args[args.index("--target") + 1]
-    files = {
-        "restored.txt": b"hello",
-        "sub/nested.bin": b"\\0" * 1500,
-    }
-    for rel, blob in files.items():
+    for rel, blob in TREE["files"].items():
         path = os.path.join(target, rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(path) or target, exist_ok=True)
         with open(path, "wb") as fh:
-            fh.write(blob)
-    os.makedirs(os.path.join(target, "empty-dir"), exist_ok=True)
-    os.symlink("restored.txt", os.path.join(target, "link"))
+            fh.write(bytes.fromhex(blob))
+    for rel in TREE["dirs"]:
+        os.makedirs(os.path.join(target, rel), exist_ok=True)
+    for rel, dest in TREE["links"].items():
+        os.symlink(dest, os.path.join(target, rel))
     if mode == "fail_restore":
         print("Fatal: unable to load snapshot 9f3a2c00", file=sys.stderr)
         sys.exit(3)
@@ -69,7 +82,20 @@ if verb == "restore":
 
 print("fake restic: unexpected verb %s" % verb, file=sys.stderr)
 sys.exit(1)
-'''
+'''.replace("__FAKE_TREE__", f"json.loads({FAKE_TREE_JSON!r})")
+
+
+def plant_fake_tree(root: Path) -> Path:
+    """Write the same bytes the fake restic restores into ``root``."""
+    for rel, blob in FAKE_FILES.items():
+        path = Path(root) / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(blob)
+    for rel in FAKE_DIRS:
+        (Path(root) / rel).mkdir(parents=True, exist_ok=True)
+    for rel, dest in FAKE_LINKS.items():
+        (Path(root) / rel).symlink_to(dest)
+    return Path(root)
 
 
 class _FakeRestic:
@@ -118,3 +144,17 @@ def config_path(tmp_path, monkeypatch):
     path = tmp_path / "config.toml"
     monkeypatch.setenv("RESTVERIFY_CONFIG", str(path))
     return path
+
+
+@pytest.fixture
+def plant_tree():
+    """Return the tree-planter so a test can build a matching source tree."""
+    return plant_fake_tree
+
+
+@pytest.fixture
+def source_tree(tmp_path):
+    """A source directory that is byte-identical to what the fake restores."""
+    root = tmp_path / "source"
+    root.mkdir()
+    return plant_fake_tree(root)

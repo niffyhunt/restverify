@@ -16,7 +16,9 @@ import time
 from pathlib import Path
 
 from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE, __version__)
+from . import compare as comparemod
 from . import config as cfgmod
+from . import excludes as excludesmod
 from . import manifest as manifestmod
 from . import restic as resticmod
 from . import sampling as samplingmod
@@ -24,6 +26,7 @@ from . import tempstore
 from .errors import ConfigError, RestverifyError
 
 PROG = "restverify"
+DIFF_DISPLAY_LIMIT = 10
 
 DESCRIPTION = (
     "Rehearse and verify restic restores locally, on a schedule, with a "
@@ -46,9 +49,9 @@ exit codes:
   64  usage problem (bad flag, unusable config) — never a verification outcome
 
 run output (this build):
-  ✓ restored snapshot <id>: N files / X in Ys
-  manifest fields, the symlink policy and the sampling rule are in `run --help`
-  the source comparison (and its diff count) lands in increment I2c
+  ✓ restored snapshot <id>: N files / X in Ys; N diffs
+  manifest fields, the symlink policy, the sampling rule and the compare
+  semantics are in `run --help`
 
 sample sha256 (this build):
   {samplingmod.RULE}
@@ -123,7 +126,17 @@ def build_parser() -> argparse.ArgumentParser:
                f"  {samplingmod.RULE}\n"
                "  digest = sha256 over 'path NUL size NUL file-sha256 LF' per sampled\n"
                "  file in sorted-path order. The empty tree hashes the empty input.\n"
-               f"  {samplingmod.REPRODUCE}\n",
+               f"  {samplingmod.REPRODUCE}\n"
+               "\nsource comparison (this build):\n"
+               "  runs when a source is saved (or given with -s) and --no-source is\n"
+               "  absent. Both trees are walked with the same excludes; any data\n"
+               "  difference exits 2 and the offending paths are named. Compared:\n"
+               "  the entry set, per-file size and kind, symlink targets, file/byte/\n"
+               "  symlink totals, and the sampled sha256 (the sample rule above bounds\n"
+               "  this - content outside the sample is not hashed). Not compared:\n"
+               "  mtimes and ordering, so those never fail a run. Warned, not failed:\n"
+               "  an empty directory present on only one side; --strict promotes that\n"
+               "  warning to exit 2. A missing/unreadable source exits 1 and teaches.\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_run.add_argument("-r", "--repo", metavar="PATH",
                        help="restic repository (or a repo name saved in the config)")
@@ -134,8 +147,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--no-source", action="store_true",
                        help="verify the restore completes without comparing to a source")
     p_run.add_argument("--strict", action="store_true",
-                       help="tighten comparison (parsed now; enforced when the "
-                            "comparison lands in increment I2c)")
+                       help="promote warning-only divergence (for example an empty "
+                            "directory present on one side only) to exit 2; data "
+                            "differences always fail regardless")
     p_run.add_argument("--snapshot", metavar="SELECTOR", default=None,
                        help="snapshot to verify: 'latest' (default) or a short id")
     _add_common(p_run)
@@ -286,14 +300,15 @@ def _restored_root(target, snapshot):
     return Path(target)
 
 
-def _run_payload(entry, snapshot, man, sample, root, elapsed, cleaned) -> dict:
+def _run_payload(entry, snapshot, man, sample, comparison, root, elapsed, cleaned) -> dict:
     """R12 + G6: the real fields that exist now, and explicit incompleteness."""
+    code = comparison.exit_code()
     return {
         "tool": PROG,
         "version": __version__,
         "command": "run",
-        "status": "pass",
-        "exit_code": EXIT_PASS,
+        "status": "diff_mismatch" if code == EXIT_DIFF_MISMATCH else "pass",
+        "exit_code": code,
         "snapshot": {
             "id": snapshot.id,
             "short_id": snapshot.short_id,
@@ -309,11 +324,10 @@ def _run_payload(entry, snapshot, man, sample, root, elapsed, cleaned) -> dict:
         },
         "manifest": man.to_json(),
         "sample": sample.to_json(),
-        "compare": {"implemented": False, "lands_in": "I2c"},
+        "compare": comparison.to_json(),
         "strict": bool(entry.strict),
         "incomplete": [
-            "source comparison (I2c)",
-            "full JSON schema (I3)",
+            "full JSON schema on failure paths (I3)",
         ],
     }
 
@@ -345,35 +359,68 @@ def _cmd_run(args) -> int:
 
     started = time.time()
     snapshot = resticmod.newest_snapshot(entry.repo, password_command, selector)
+    matcher = excludesmod.compile_matcher(entry.excludes)
     with tempstore.restore_dir(entry.repo) as target:
         resticmod.restore(entry.repo, snapshot, target,
                           excludes=entry.excludes, password_command=password_command)
         restore_root = _restored_root(target, snapshot)
-        man = manifestmod.build(restore_root, ignore_top_level=(tempstore.MARKER,))
+        man = manifestmod.build(restore_root, ignore_top_level=(tempstore.MARKER,),
+                                exclude=matcher)
         sample = samplingmod.sample_tree(man, restore_root, entry.excludes)
         cleaned = tempstore.cleanup(target)
     elapsed = int(time.time() - started)
 
+    if entry.source and not entry.no_source:
+        comparison = comparemod.compare(man, sample, entry.source,
+                                        patterns=entry.excludes, strict=entry.strict)
+    else:
+        comparison = comparemod.skipped(
+            "--no-source" if entry.no_source else "no source saved",
+            source=entry.source)
+    exit_code = comparison.exit_code()
+
     if args.json:
-        print(json.dumps(_run_payload(entry, snapshot, man, sample, restore_root,
-                                      elapsed, cleaned),
+        print(json.dumps(_run_payload(entry, snapshot, man, sample, comparison,
+                                      restore_root, elapsed, cleaned),
                          indent=2, ensure_ascii=False))
-        return EXIT_PASS
+        return exit_code
 
     size = human_bytes(man.total_bytes)
-    print(f"✓ restored snapshot {snapshot.short_id}: {man.file_count} files / "
-          f"{size} in {elapsed}s")
+    mark = "✓" if not comparison.failed else "✗"
+    tail = ""
+    if comparison.enabled:
+        tail = f"; {len(comparison.errors)} diff(s)"
+        if comparison.strict and comparison.warnings:
+            tail += (f" (+{len(comparison.warnings)} warning(s) promoted "
+                     "by --strict)")
+    print(f"{mark} restored snapshot {snapshot.short_id}: {man.file_count} files / "
+          f"{size} in {elapsed}s{tail}")
     print(f"  manifest : {man.file_count} files, {size}, {man.directory_count} dirs, "
           f"max depth {man.max_depth}, {man.symlink_count} symlink(s) "
           f"({manifestmod.SYMLINK_POLICY}), {len(man.ignored)} tempstore file(s) ignored")
     print(f"  sample   : {sample.digest} ({len(sample.files)} of "
           f"{sample.total_files} files; {sample.rule})")
-    print("  compare  : excludes-aware source comparison (I2c)")
-    if entry.strict:
-        print("  note     : --strict has no effect until the comparison lands (I2c)")
+    if comparison.enabled:
+        print(f"  compare  : {comparison.status} vs {comparison.source} "
+              f"({len(comparison.errors)} error(s), {len(comparison.warnings)} "
+              f"warning(s); strict {'on' if comparison.strict else 'off'})")
+        for diff in comparison.errors[:DIFF_DISPLAY_LIMIT]:
+            print(f"    - {diff.path or '(totals)'}: {diff.detail}")
+        remaining = len(comparison.errors) - DIFF_DISPLAY_LIMIT
+        if remaining > 0:
+            print(f"    ... and {remaining} more (full list in --json)")
+        for diff in comparison.warnings[:DIFF_DISPLAY_LIMIT]:
+            print(f"    ! {diff.path}: {diff.detail} (warning)")
+    else:
+        print(f"  compare  : skipped ({comparison.reason})")
+        if not entry.source:
+            print("    note: without a source this only proves the restore completed; "
+                  "add one with `restverify init -r <repo> -s <path>`")
+    if entry.strict and not comparison.enabled:
+        print("  note     : --strict had nothing to tighten (compare skipped)")
     if not cleaned:
         print(f"  warning  : the temp restore dir at {restore_root} could not be removed")
-    return EXIT_PASS
+    return exit_code
 
 
 # ── dispatch ────────────────────────────────────────────────────────────────

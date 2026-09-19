@@ -49,3 +49,7 @@ class ManifestError(RestverifyError):
 
 class SampleError(RestverifyError):
     """A sampled file could not be read for hashing (vanished, symlinked, I/O)."""
+
+
+class SourceError(RestverifyError):
+    """The comparison source is missing, unreadable, or not a directory (R14)."""
