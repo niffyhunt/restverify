@@ -45,3 +45,7 @@ class TempDirError(RestverifyError):
 
 class ManifestError(RestverifyError):
     """The restored tree could not be walked (permissions, vanished entry)."""
+
+
+class SampleError(RestverifyError):
+    """A sampled file could not be read for hashing (vanished, symlinked, I/O)."""

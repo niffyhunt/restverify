@@ -225,10 +225,11 @@ def test_json_run_emits_manifest_and_labels_compare_incomplete(
     assert man["symlink_policy"] == "recorded-not-followed"
     assert man["largest_file"]["path"] == "sub/nested.bin"
     assert man["ignored"] == [".restverify-marker"]   # our marker, not restored data
-    assert payload["sample"] == {"implemented": False, "lands_in": "I2b"}
+    assert payload["sample"]["algorithm"] == "sha256"
+    assert payload["sample"]["digest"].startswith("sha256:")
+    assert payload["sample"]["sampled_files"] == 2
     assert payload["compare"] == {"implemented": False, "lands_in": "I2c"}
-    assert payload["incomplete"] == ["sample sha256 (I2b)",
-                                     "source comparison (I2c)",
+    assert payload["incomplete"] == ["source comparison (I2c)",
                                      "full JSON schema (I3)"]
     assert payload["restore"]["target_removed"] is True
     assert list(Path(tmp_base).iterdir()) == []

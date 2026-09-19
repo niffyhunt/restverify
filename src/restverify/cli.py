@@ -19,6 +19,7 @@ from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE, __v
 from . import config as cfgmod
 from . import manifest as manifestmod
 from . import restic as resticmod
+from . import sampling as samplingmod
 from . import tempstore
 from .errors import ConfigError, RestverifyError
 
@@ -31,7 +32,7 @@ DESCRIPTION = (
     "forget/prune, and never stores your password."
 )
 
-EPILOG = """examples:
+EPILOG = f"""examples:
   restverify run -r /srv/backup            verify the newest snapshot (start here)
   restverify run -r /srv/backup --dry-run  show what would happen; restore nothing
   restverify init -r /srv/backup           save a repo (with source/excludes) to config
@@ -49,6 +50,11 @@ run output (this build):
   manifest fields, the symlink policy and the sampling rule are in `run --help`
   the source comparison (and its diff count) lands in increment I2c
 
+sample sha256 (this build):
+  {samplingmod.RULE}
+  digest = sha256 over "path NUL size NUL file-sha256 LF" per sampled file in
+  sorted-path order; {samplingmod.REPRODUCE}
+
 next: run `restverify run -r <repo>` to verify your first snapshot
 """
 
@@ -65,8 +71,8 @@ class _Parser(argparse.ArgumentParser):
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true",
-                   help="machine-readable JSON; the sample hash completes in I2b, "
-                        "the compare block in I2c, the full schema in I3")
+                   help="machine-readable JSON; the compare block completes in I2c, "
+                        "the full schema in I3")
     p.add_argument("--config", metavar="PATH", default=None,
                    help=f"config file to use (default: {cfgmod.default_config_path()})")
 
@@ -111,7 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
                "  symlinks: recorded with their target, never followed (following one\n"
                "  could read outside the restore target); a symlinked directory is one\n"
                "  link entry, not a subtree. No depth limit is imposed by restverify.\n"
-               "  contents are not read in this build - the sampled sha256 is I2b.\n",
+               "  contents are read only for the sampled files, never through a\n"
+               "  symlink; a file that became a link is an error, not a silent read.\n"
+               "\nsample sha256 (this build):\n"
+               f"  {samplingmod.RULE}\n"
+               "  digest = sha256 over 'path NUL size NUL file-sha256 LF' per sampled\n"
+               "  file in sorted-path order. The empty tree hashes the empty input.\n"
+               f"  {samplingmod.REPRODUCE}\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_run.add_argument("-r", "--repo", metavar="PATH",
                        help="restic repository (or a repo name saved in the config)")
@@ -274,7 +286,7 @@ def _restored_root(target, snapshot):
     return Path(target)
 
 
-def _run_payload(entry, snapshot, man, root, elapsed, cleaned) -> dict:
+def _run_payload(entry, snapshot, man, sample, root, elapsed, cleaned) -> dict:
     """R12 + G6: the real fields that exist now, and explicit incompleteness."""
     return {
         "tool": PROG,
@@ -296,11 +308,10 @@ def _run_payload(entry, snapshot, man, root, elapsed, cleaned) -> dict:
             "elapsed_seconds": elapsed,
         },
         "manifest": man.to_json(),
-        "sample": {"implemented": False, "lands_in": "I2b"},
+        "sample": sample.to_json(),
         "compare": {"implemented": False, "lands_in": "I2c"},
         "strict": bool(entry.strict),
         "incomplete": [
-            "sample sha256 (I2b)",
             "source comparison (I2c)",
             "full JSON schema (I3)",
         ],
@@ -327,7 +338,7 @@ def _cmd_run(args) -> int:
         print(f"  excludes : {', '.join(entry.excludes) if entry.excludes else '(none)'}")
         print(f"  temp dir : a fresh private dir under {tempstore.base_dir()}, removed afterwards")
         print("  manifest : file count, byte totals and a per-directory roll-up (this build)")
-        print("  sample   : deterministic sha256 digest of the sampled files (I2b)")
+        print("  sample   : deterministic sha256 digest of the sampled files (this build)")
         print("  compare  : excludes-aware source comparison (I2c)")
         print("✓ PASS (dry run) — nothing was restored, nothing was written")
         return EXIT_PASS
@@ -339,11 +350,13 @@ def _cmd_run(args) -> int:
                           excludes=entry.excludes, password_command=password_command)
         restore_root = _restored_root(target, snapshot)
         man = manifestmod.build(restore_root, ignore_top_level=(tempstore.MARKER,))
+        sample = samplingmod.sample_tree(man, restore_root, entry.excludes)
         cleaned = tempstore.cleanup(target)
     elapsed = int(time.time() - started)
 
     if args.json:
-        print(json.dumps(_run_payload(entry, snapshot, man, restore_root, elapsed, cleaned),
+        print(json.dumps(_run_payload(entry, snapshot, man, sample, restore_root,
+                                      elapsed, cleaned),
                          indent=2, ensure_ascii=False))
         return EXIT_PASS
 
@@ -353,7 +366,8 @@ def _cmd_run(args) -> int:
     print(f"  manifest : {man.file_count} files, {size}, {man.directory_count} dirs, "
           f"max depth {man.max_depth}, {man.symlink_count} symlink(s) "
           f"({manifestmod.SYMLINK_POLICY}), {len(man.ignored)} tempstore file(s) ignored")
-    print("  sample   : deterministic sha256 digest of the sampled files (I2b)")
+    print(f"  sample   : {sample.digest} ({len(sample.files)} of "
+          f"{sample.total_files} files; {sample.rule})")
     print("  compare  : excludes-aware source comparison (I2c)")
     if entry.strict:
         print("  note     : --strict has no effect until the comparison lands (I2c)")
