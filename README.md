@@ -31,6 +31,19 @@ Requires Python 3.11+ and a `restic` binary on PATH.
 restverify run -r /srv/backup
 ```
 
+## History
+
+Every verification writes one row to a local SQLite store — failures included,
+because a trend that hides failures is worse than no trend:
+
+- store: `~/.local/state/restverify/history.db` (XDG state dir; override with
+  `RESTVERIFY_STATE=/some/dir`)
+- retention: the newest 1000 rows per repository, pruned on write; the first
+  prune announces itself on stderr
+- read it with `restverify report` (human) or `restverify report --json`
+  (a `"schema": 1` envelope)
+- `--dry-run` writes nothing; disabling the store is not supported yet
+
 ## Honest limits (required by the contract)
 
 - **Biggest risk:** operators who already run a full orchestrator (resticprofile,

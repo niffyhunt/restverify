@@ -37,6 +37,7 @@ DIFF_DISPLAY_LIMIT = 10
 _JSON_MODE = False
 _RAW_ARGV: list[str] = []
 _KNOWN_COMMANDS = ("init", "run", "report", "cron")
+_PRUNE_ANNOUNCED: set[str] = set()   # one retention announcement per repo/process
 
 
 def _wants_json(argv) -> bool:
@@ -237,6 +238,12 @@ def build_parser() -> argparse.ArgumentParser:
                "  snapshot the short id that was verified\n"
                "  kind     the failure kind (empty when the run passed)\n"
                "  repo     the restic repository the run verified\n"
+               "\nhistory store:\n"
+               "  ~/.local/state/restverify/history.db (RESTVERIFY_STATE overrides)\n"
+               "  one row per verification, including failures; --dry-run writes none\n"
+               "  retention: the newest 1000 rows per repository, pruned on write\n"
+               "  (the first prune announces itself on stderr; disabling history is\n"
+               "  not supported yet)\n"
                "\njson envelope (--json):\n"
                "  one object on stdout, schema 1, command \"report\", status \"report\";\n"
                "  teaching text and argparse's usage go to stderr, same purity rule as run.\n"
@@ -495,10 +502,14 @@ def _write_history(record: "historymod.RunRecord") -> dict:
     teaching line on stderr and is reported honestly in the JSON block. The
     caller decides whether a row is written at all (cli decides; history.py does
     not) — the same boundary as `--dry-run` and restic.
+
+    Retention (I4c): when the write prunes rows for a repository, it is
+    announced once per process per repository — never silently, never on every
+    write.
     """
+    global _PRUNE_ANNOUNCED
     try:
-        historymod.record(record)
-        return {"recorded": True, "path": str(historymod.state_path())}
+        path, pruned = historymod.record(record)
     except HistoryError as exc:
         print(f"{PROG}: could not record this run in history: {exc.what}",
               file=sys.stderr)
@@ -506,6 +517,11 @@ def _write_history(record: "historymod.RunRecord") -> dict:
             print(f"  next: {exc.hint}", file=sys.stderr)
         return {"recorded": False, "path": str(historymod.state_path()),
                 "warning": exc.what}
+    if pruned and record.repo not in _PRUNE_ANNOUNCED:
+        _PRUNE_ANNOUNCED.add(record.repo)
+        print(f"{PROG}: history pruned for {record.repo}: kept the newest "
+              f"{historymod.RETENTION_PER_REPO} rows", file=sys.stderr)
+    return {"recorded": True, "path": str(path), "pruned": pruned}
 
 
 def _cmd_run(args) -> int:
@@ -755,10 +771,11 @@ _PENDING = {"cron": "I5"}
 
 
 def main(argv=None) -> int:
-    global _JSON_MODE, _RAW_ARGV
+    global _JSON_MODE, _RAW_ARGV, _PRUNE_ANNOUNCED
     raw = list(sys.argv[1:] if argv is None else argv)
     _JSON_MODE = _wants_json(raw)      # ruling 2: format decision only
     _RAW_ARGV = raw
+    _PRUNE_ANNOUNCED.clear()           # one announcement per process
 
     parser = build_parser()
     try:

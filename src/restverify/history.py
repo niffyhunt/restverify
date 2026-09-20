@@ -38,6 +38,7 @@ from .errors import HistoryError
 STATE_ENV = "RESTVERIFY_STATE"
 DB_NAME = "history.db"
 STORE_SCHEMA = 1
+RETENTION_PER_REPO = 1000          # pruned on write (I4c); announced once
 
 _COLUMNS = ("id, started_at, finished_at, duration_ms, repo, snapshot, status, "
             "exit_code, error_kind, file_count, total_bytes, diff_count, digest, "
@@ -193,8 +194,14 @@ def _connect(path: Path, create: bool = False) -> sqlite3.Connection:
     return connection
 
 
-def record(record_: RunRecord, base: Path | str | None = None) -> Path:
-    """Append one row atomically. Returns the store path. Raises HistoryError."""
+def record(record_: RunRecord, base: Path | str | None = None) -> tuple[Path, int]:
+    """Append one row atomically, then prune (I4c).
+
+    Returns ``(store path, pruned row count)``. The insert and the prune share
+    one BEGIN IMMEDIATE/COMMIT transaction, so a crash cannot leave a half
+    state. The prune keeps the newest ``RETENTION_PER_REPO`` rows of this record's
+    repository only — other repositories are never touched. Raises HistoryError.
+    """
     path = state_path(base)
     connection = _connect(path, create=True)
     try:
@@ -202,7 +209,17 @@ def record(record_: RunRecord, base: Path | str | None = None) -> Path:
         connection.execute(
             f"INSERT INTO runs ({_INSERT}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             record_.as_row())
-        connection.execute("COMMIT")          # crash before this -> rolled back
+        pruned = 0
+        kept = connection.execute(
+            "SELECT COUNT(*) FROM runs WHERE repo = ?", (record_.repo,)).fetchone()[0]
+        if kept > RETENTION_PER_REPO:
+            excess = kept - RETENTION_PER_REPO
+            connection.execute(
+                "DELETE FROM runs WHERE repo = ? AND id IN "
+                "(SELECT id FROM runs WHERE repo = ? ORDER BY id ASC LIMIT ?)",
+                (record_.repo, record_.repo, excess))
+            pruned = excess
+        connection.execute("COMMIT")      # crash before this -> rolled back
     except sqlite3.Error as exc:
         try:
             connection.execute("ROLLBACK")
@@ -214,7 +231,7 @@ def record(record_: RunRecord, base: Path | str | None = None) -> Path:
         ) from exc
     finally:
         connection.close()
-    return path
+    return path, pruned
 
 
 def read_recent(limit: int = 10, repo: str | None = None,
