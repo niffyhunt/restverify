@@ -74,9 +74,12 @@ def test_help_documents_the_usage_code(capsys):
     assert "64" in out, "the -64 usage code must be documented in --help (U3)"
 
 
-@pytest.mark.parametrize("cmd,ptr", [("report", "I4"), ("cron", "I5")])
+@pytest.mark.parametrize("cmd,ptr", [("cron", "I5")])
 def test_unimplemented_commands_are_honest(cmd, ptr, capsys):
-    """Gate G6: the scaffold must not pretend to work."""
+    """Gate G6: the scaffold must not pretend to work.
+
+    `report` was removed from this list at I4b, where it became real.
+    """
     code = main([cmd])
     err = capsys.readouterr().err
     assert code != EXIT_PASS

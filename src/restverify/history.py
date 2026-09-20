@@ -118,17 +118,23 @@ def iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat(timespec="seconds")
 
 
-def _connect(path: Path) -> sqlite3.Connection:
-    """Open (creating on first use) and verify the store. Raises HistoryError."""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    except OSError as exc:
-        raise HistoryError(
-            f"could not create the history state directory {path.parent}: "
-            f"{exc.strerror or exc}",
-            hint="fix permissions, or point RESTVERIFY_STATE at a writable "
-                 "directory (the store is machine state, not config)",
-        ) from exc
+def _connect(path: Path, create: bool = False) -> sqlite3.Connection:
+    """Open and verify the store. Raises HistoryError.
+
+    ``create`` is True only for writers: a reader (`report`) must not create the
+    directory, the tables or the meta row — "report reads only" is then provable
+    by fingerprinting the file, not by convention.
+    """
+    if create:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        except OSError as exc:
+            raise HistoryError(
+                f"could not create the history state directory {path.parent}: "
+                f"{exc.strerror or exc}",
+                hint="fix permissions, or point RESTVERIFY_STATE at a writable "
+                     "directory (the store is machine state, not config)",
+            ) from exc
     try:
         connection = sqlite3.connect(path, timeout=5.0, isolation_level=None)
     except sqlite3.Error as exc:
@@ -150,19 +156,29 @@ def _connect(path: Path) -> sqlite3.Connection:
     except sqlite3.DatabaseError as exc:
         refuse(f"{exc}", f"move it aside (`mv {path} {path}.bak`) or set "
                          f"{STATE_ENV} to a fresh directory, then re-run")
-    if found and not {"runs", "meta"} <= found:
-        refuse("it is a SQLite file that is not a restverify history store",
+    if create:
+        if found and not {"runs", "meta"} <= found:
+            refuse("it is a SQLite file that is not a restverify history store",
+                   f"move it aside (`mv {path} {path}.bak`) or set {STATE_ENV} to "
+                   "a fresh directory")
+    elif not {"runs", "meta"} <= found:
+        refuse("it is not a restverify history store (missing tables)",
                f"move it aside (`mv {path} {path}.bak`) or set {STATE_ENV} to a "
                "fresh directory")
     try:
-        for statement in _DDL:
-            connection.execute(statement)
+        if create:
+            for statement in _DDL:
+                connection.execute(statement)
         version = connection.execute(
             "SELECT value FROM meta WHERE key='store_schema'").fetchone()
         if version is None:
-            connection.execute(
-                "INSERT INTO meta(key, value) VALUES('store_schema', ?)",
-                (str(STORE_SCHEMA),))
+            if create:
+                connection.execute(
+                    "INSERT INTO meta(key, value) VALUES('store_schema', ?)",
+                    (str(STORE_SCHEMA),))
+            else:
+                refuse("it carries no store schema marker",
+                       "move it aside or point RESTVERIFY_STATE at a fresh directory")
         elif int(version[0]) > STORE_SCHEMA:
             refuse(f"its store schema is {version[0]}, newer than this build's "
                    f"{STORE_SCHEMA}",
@@ -180,7 +196,7 @@ def _connect(path: Path) -> sqlite3.Connection:
 def record(record_: RunRecord, base: Path | str | None = None) -> Path:
     """Append one row atomically. Returns the store path. Raises HistoryError."""
     path = state_path(base)
-    connection = _connect(path)
+    connection = _connect(path, create=True)
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(
@@ -207,7 +223,7 @@ def read_recent(limit: int = 10, repo: str | None = None,
     path = state_path(base)
     if not path.exists():
         raise HistoryError(
-            f"no run history found at {path}.",
+            f"no runs recorded yet (no history store at {path}).",
             hint="run your first verification (`restverify run -r <repo>`), then "
                  "re-run report",
         )

@@ -228,8 +228,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_report = sub.add_parser(
         "report", help="show run history and trend",
         description="Read the local run history and show pass/fail trend.",
-        epilog="examples:\n  restverify report\n  restverify report --json",
+        epilog="examples:\n  restverify report\n  restverify report --limit 25\n"
+               "  restverify report --repo /srv/backup --json\n"
+               "\ncolumns (newest first):\n"
+               "  started  UTC start time of the run\n"
+               "  status   pass | diff_mismatch | error\n"
+               "  exit     0 verified, 1 could not complete, 2 differs from source\n"
+               "  snapshot the short id that was verified\n"
+               "  kind     the failure kind (empty when the run passed)\n"
+               "  repo     the restic repository the run verified\n"
+               "\njson envelope (--json):\n"
+               "  one object on stdout, schema 1, command \"report\", status \"report\";\n"
+               "  teaching text and argparse's usage go to stderr, same purity rule as run.\n"
+               "  report.report holds repo, runs (count in the window), limit, counts,\n"
+               "  pass_rate, longest_green_streak, last_failure and recent (the newest\n"
+               "  rows). report exits 0 whenever the store is readable (even if the last\n"
+               "  run failed - run is what cron acts on) and 1 only when the store cannot\n"
+               "  be read at all.\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_report.add_argument("-r", "--repo", metavar="REPO",
+                          help="only runs for this repository (path, or a name saved in config)")
+    p_report.add_argument("--limit", type=int, default=10, metavar="N",
+                          help="how many recent runs to list (default: 10)")
     _add_common(p_report)
 
     p_cron = sub.add_parser(
@@ -599,10 +619,139 @@ def _cmd_run(args) -> int:
     return exit_code
 
 
+# ── report ──────────────────────────────────────────────────────────────────
+
+FAILURE_REASONS = {
+    "diff_mismatch": "the restored data differed from the source",
+    "source": "the comparison source could not be read",
+    "restic_failed": "restic failed while restoring",
+    "restic_missing": "restic was not found on PATH",
+    "no_snapshots": "there were no snapshots to verify",
+    "tempdir": "the temporary restore directory could not be created",
+    "manifest": "the restored tree could not be read",
+    "sample": "the restored files could not be hashed",
+    "history": "the run could not be written to the history store",
+    "config": "the configuration could not be used",
+    "usage": "the command line could not be parsed",
+    "interrupted": "the run was interrupted",
+}
+
+
+def _failure_reason(row) -> str:
+    """Plain language for the last failure, never the raw kind (U5)."""
+    if row.status == "diff_mismatch":
+        detail = f" ({row.diff_count} differing file(s))" if row.diff_count else ""
+        return FAILURE_REASONS["diff_mismatch"] + detail
+    return FAILURE_REASONS.get(row.error_kind or "", "the run did not complete")
+
+
+def _longest_green_streak(rows) -> int:
+    """Longest run of consecutive passes in chronological order."""
+    best = streak = 0
+    for row in reversed(rows):                 # rows arrive newest-first
+        if row.status == "pass":
+            streak += 1
+            best = max(best, streak)
+        else:
+            streak = 0
+    return best
+
+
+def _row_json(row) -> dict:
+    return {
+        "started_at": row.started_at, "finished_at": row.finished_at,
+        "duration_ms": row.duration_ms, "repo": row.repo, "snapshot": row.snapshot,
+        "status": row.status, "exit_code": row.exit_code, "error_kind": row.error_kind,
+        "file_count": row.file_count, "total_bytes": row.total_bytes,
+        "diff_count": row.diff_count, "digest": row.digest,
+        "tool_version": row.tool_version, "schema": row.schema,
+    }
+
+
+def _report_json(rows, repo_filter: str | None, limit: int) -> dict:
+    """command="report", status="report": a report is not a run (I4 ruling 4)."""
+    counts = {"pass": 0, "diff_mismatch": 0, "error": 0}
+    for row in rows:
+        counts[row.status] = counts.get(row.status, 0) + 1
+    total = len(rows)
+    failure = next((row for row in rows if row.status != "pass"), None)
+    return {
+        "tool": PROG,
+        "schema": SCHEMA_VERSION,
+        "version": __version__,
+        "command": "report",
+        "status": "report",
+        "exit_code": EXIT_PASS,
+        "report": {
+            "repo": repo_filter,
+            "runs": total,
+            "limit": limit,
+            "counts": counts,
+            "pass_rate": (counts["pass"] / total) if total else None,
+            "longest_green_streak": _longest_green_streak(rows),
+            "last_failure": None if failure is None else {
+                "started_at": failure.started_at,
+                "repo": failure.repo,
+                "status": failure.status,
+                "exit_code": failure.exit_code,
+                "kind": failure.error_kind,
+                "reason": _failure_reason(failure),
+            },
+            "recent": [_row_json(row) for row in rows],
+        },
+    }
+
+
+def _cmd_report(args) -> int:
+    """Reads the store; never writes to it (the fingerprint test proves it)."""
+    repo_filter = args.repo
+    if repo_filter:
+        try:
+            entry = cfgmod.load_config(args.config).find(repo_filter)
+        except RestverifyError:
+            entry = None
+        if entry is not None:
+            repo_filter = entry.repo          # a saved name is enough
+    limit = max(1, int(args.limit))
+    rows = historymod.read_recent(limit=limit, repo=repo_filter)
+    if not rows:
+        raise HistoryError(
+            f"no runs recorded yet for {repo_filter or 'any repository'}.",
+            hint="run your first verification (`restverify run -r <repo>`), then "
+                 "re-run report",
+        )
+
+    if _JSON_MODE:
+        _emit_json(_report_json(rows, repo_filter, limit))
+        return EXIT_PASS
+
+    counts = {"pass": 0, "diff_mismatch": 0, "error": 0}
+    for row in rows:
+        counts[row.status] = counts.get(row.status, 0) + 1
+    total = len(rows)
+    rate = f"{counts['pass'] * 100 // total}% pass" if total else "n/a"
+    failure = next((row for row in rows if row.status != "pass"), None)
+    print(f"{PROG} report — {total} recent run(s)")
+    print(f"  repo     : {repo_filter or 'all repositories'}")
+    print(f"  trend    : {counts['pass']} pass, {counts['diff_mismatch']} diff, "
+          f"{counts['error']} error  ({rate})")
+    print(f"  streak   : longest green streak {_longest_green_streak(rows)} run(s)")
+    if failure is None:
+        print("  last fail: none in this window")
+    else:
+        print(f"  last fail: {failure.started_at} — {_failure_reason(failure)}")
+    print("recent runs (newest first):")
+    for index, row in enumerate(rows, 1):
+        print(f"  {index:>3}  {row.started_at}  {row.status:<13} "
+              f"exit {row.exit_code:<2} {row.snapshot or '-':<9} "
+              f"{row.error_kind or '-':<13} {row.repo}")
+    return EXIT_PASS
+
+
 # ── dispatch ────────────────────────────────────────────────────────────────
 
-_DISPATCH = {"init": _cmd_init, "run": _cmd_run}
-_PENDING = {"report": "I4", "cron": "I5"}
+_DISPATCH = {"init": _cmd_init, "run": _cmd_run, "report": _cmd_report}
+_PENDING = {"cron": "I5"}
 
 
 def main(argv=None) -> int:
