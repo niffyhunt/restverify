@@ -11,8 +11,11 @@ escapes, so the generated script cannot rot from double-escaping.
 """
 import json
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -144,6 +147,38 @@ def config_path(tmp_path, monkeypatch):
     path = tmp_path / "config.toml"
     monkeypatch.setenv("RESTVERIFY_CONFIG", str(path))
     return path
+
+
+@pytest.fixture(scope="session")
+def _state_base():
+    """One state base per session, on tmpfs where the platform has it.
+
+    The store does a real fsync per write (durability is the point), which is
+    measurable on a slow /tmp: putting the test stores on /dev/shm (Linux, WSL2)
+    keeps the same SQLite operations without the disk latency. Falls back to a
+    normal temp dir elsewhere (e.g. native Windows). Teardown happens after every
+    test-level monkeypatch is undone, so it cannot trip over a patched os.scandir.
+    """
+    shm = Path("/dev/shm")
+    parent = shm if (shm.is_dir() and os.access(shm, os.W_OK)) else None
+    base = Path(tempfile.mkdtemp(prefix="restverify-states-",
+                                 dir=str(parent) if parent else None))
+    yield base
+    shutil.rmtree(base, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(_state_base, monkeypatch):
+    """Every test gets its own durable-state dir, created lazily by history.py.
+
+    Since I4a the run path writes a history row (history.py). Autouse on purpose:
+    a new test cannot forget it, and no test can touch the real
+    ~/.local/state/restverify. The path is deliberately *not* created here, so
+    "the store is created on first run" stays observable.
+    """
+    state = _state_base / f"state-{uuid4().hex}"
+    monkeypatch.setenv("RESTVERIFY_STATE", str(state))
+    return state
 
 
 @pytest.fixture

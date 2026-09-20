@@ -20,8 +20,20 @@ from __future__ import annotations
 
 ERROR_KINDS = frozenset({
     "usage", "config", "restic_missing", "restic_failed", "no_snapshots",
-    "source", "manifest", "sample", "tempdir", "interrupted",
+    "source", "manifest", "sample", "tempdir", "history", "interrupted",
 })
+
+# Ruling (I4, operator-confirmed): "history" was ADDED to the vocabulary after
+# I3 froze it at ten members, because the durable store needs a kind of its own
+# and no existing member fits (config -> 64 is a usage problem; the store is
+# machine state whose failures are exit 1). That is an explicit amendment of
+# I3 ruling 5, recorded in the I4 briefing.
+#
+# Exit-code policy for the store is asymmetric on purpose:
+#   * `report` cannot read the store  -> HistoryError -> exit 1, kind "history";
+#   * a `run` that verified cleanly but could not WRITE its row stays on the
+#     verification's exit code and warns on stderr (history is auxiliary).
+#     cli.py decides that, not this module (same boundary as --dry-run).
 
 # Defensive default for the JSON envelope only. A subtype without its own kind
 # is a bug that I3b's exhaustive test must catch; until then this keeps a
@@ -100,6 +112,16 @@ class SourceError(RestverifyError):
     kind = "source"
 
 
+class HistoryError(RestverifyError):
+    """The durable run history could not be read or written (R10, I4).
+
+    Raised by history.py only. `report` treats it as fatal (exit 1); a `run`
+    treats it as a warning and keeps the verification's exit code (ruling 2).
+    """
+
+    kind = "history"
+
+
 def kind_of(exc: BaseException) -> str:
     """The closed-vocabulary kind for an exception. Never raises, never returns
     a value outside ``ERROR_KINDS`` (see FALLBACK_KIND)."""
@@ -125,6 +147,7 @@ CODE_BY_ERROR = {
     ManifestError: EXIT_RESTORE_FAIL,
     SampleError: EXIT_RESTORE_FAIL,
     SourceError: EXIT_RESTORE_FAIL,
+    HistoryError: EXIT_RESTORE_FAIL,
 }
 
 # Kinds that have no exception class of their own: "usage" is raised by the

@@ -172,6 +172,7 @@ for shipped code:
 | `tests/conftest.py` fake-restic harness (`FAKE_RESTIC`, `FAKE_FILES`/`FAKE_DIRS`/`FAKE_LINKS`, `plant_fake_tree`, `source_tree`, `tmp_base`, `config_path`) | the entire suite is deterministic and offline because a fake `restic` is put on `PATH` (B1: no real restic on the build box); `plant_fake_tree`/`source_tree` let a test plant a byte-identical source tree on purpose | module docstring + the I2/I1 briefings |
 | `tests/test_i2_compare.py::fingerprint()` | proves the source tree is never written to (size + mtime_ns + sha256 before/after) — evidence for R26/R23 | that module's docstring |
 | `tests/test_i2_manifest.py::test_human_bytes_units` | the R29 formatter's contract test (6 parametrised cases) | test docstring names R29 |
+| `tests/conftest.py` `isolated_state` / `_state_base` | every test gets its own durable-state dir (autouse, `RESTVERIFY_STATE`), so the suite can never write the real `~/.local/state/restverify`; the per-session base prefers tmpfs because the store now does a real fsync per write | that fixture's docstring + the I4 briefing |
 
 Worked example of the shipped-code rule: `cli.human_bytes()` arrived as an
 unplanned extra during I2 and was **numbered R29** (added to the requirement

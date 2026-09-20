@@ -21,7 +21,7 @@ from restverify.cli import main
 SHIPPED = sorted((Path(__file__).resolve().parents[1] / "src" / "restverify").rglob("*.py"))
 REQUIRED_KEYS = {"tool", "schema", "version", "command", "status", "exit_code"}
 MODE_BLOCKS = {"snapshot", "restore", "manifest", "sample", "compare", "strict",
-               "dry_run", "error"}
+               "dry_run", "error", "history"}
 
 
 def pure_json(text: str) -> dict:

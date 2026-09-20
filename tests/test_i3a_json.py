@@ -27,7 +27,7 @@ from restverify.errors import ERROR_KINDS
 TOP_LEVEL = {"tool", "version", "command", "status", "exit_code"}
 THE_TEN_KINDS = {
     "usage", "config", "restic_missing", "restic_failed", "no_snapshots",
-    "source", "manifest", "sample", "tempdir", "interrupted",
+    "source", "manifest", "sample", "tempdir", "history", "interrupted",
 }
 
 

@@ -20,11 +20,13 @@ from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE,
 from . import compare as comparemod
 from . import config as cfgmod
 from . import excludes as excludesmod
+from . import history as historymod
 from . import manifest as manifestmod
 from . import restic as resticmod
 from . import sampling as samplingmod
 from . import tempstore
-from .errors import (CODE_BY_KIND, ConfigError, RestverifyError, exit_code_for, kind_of)
+from .errors import (CODE_BY_KIND, ConfigError, HistoryError, RestverifyError,
+                     exit_code_for, kind_of)
 
 PROG = "restverify"
 DIFF_DISPLAY_LIMIT = 10
@@ -251,6 +253,36 @@ def _note_json_deferred(args) -> None:
               "showing the human-readable output instead.", file=sys.stderr)
 
 
+def _record_error_run(args, kind: str, code: int, started: float) -> None:
+    """A failed `run` still trends (every run writes a row, including failures).
+
+    Only `run` writes rows: `init`/`report`/`cron` do not. Repo resolution is
+    best-effort here because the failure may have happened before (or instead
+    of) resolving the entry; an unresolvable repo is recorded as "(unknown)"
+    rather than guessing.
+    """
+    if getattr(args, "command", None) != "run":
+        return
+    repo = getattr(args, "repo", "") or ""
+    try:
+        entry = _resolve_entry(args, cfgmod.load_config(args.config))
+        repo = entry.repo
+    except RestverifyError:
+        pass
+    finished = time.time()
+    _write_history(historymod.RunRecord(
+        repo=repo or "(unknown)",
+        status="error",
+        exit_code=code,
+        started_at=historymod.iso(started),
+        finished_at=historymod.iso(finished),
+        duration_ms=int((finished - started) * 1000),
+        error_kind=kind,
+        tool_version=__version__,
+        schema=SCHEMA_VERSION,
+    ))
+
+
 def _pending(cmd: str, increment: str) -> int:
     print(f"{PROG}: '{cmd}' is not implemented yet in this build.\n"
           f"  why:   scaffold builds the CLI surface and contract first\n"
@@ -380,9 +412,10 @@ def _restored_root(target, snapshot):
     return Path(target)
 
 
-def _run_payload(entry, snapshot, man, sample, comparison, root, elapsed, cleaned) -> dict:
-    """The run envelope. Complete as of I3c: every field is real, and
-    "schema" pins the shape for consumers."""
+def _run_payload(entry, snapshot, man, sample, comparison, history_block, root,
+                 elapsed, cleaned) -> dict:
+    """The run envelope. Every field is real, "schema" pins the shape, and the
+    additive "history" block states whether this run reached the store."""
     code = comparison.exit_code()
     return {
         "tool": PROG,
@@ -391,6 +424,7 @@ def _run_payload(entry, snapshot, man, sample, comparison, root, elapsed, cleane
         "command": "run",
         "status": "diff_mismatch" if code == EXIT_DIFF_MISMATCH else "pass",
         "exit_code": code,
+        "history": history_block,
         "snapshot": {
             "id": snapshot.id,
             "short_id": snapshot.short_id,
@@ -432,6 +466,26 @@ def _dry_run_payload(entry, selector: str) -> dict:
             "temp_dir": f"a fresh private dir under {tempstore.base_dir()}, removed afterwards",
         },
     }
+
+
+def _write_history(record: "historymod.RunRecord") -> dict:
+    """Best-effort history write (I4 ruling 2).
+
+    A store failure never changes the verification's exit code: it warns with a
+    teaching line on stderr and is reported honestly in the JSON block. The
+    caller decides whether a row is written at all (cli decides; history.py does
+    not) — the same boundary as `--dry-run` and restic.
+    """
+    try:
+        historymod.record(record)
+        return {"recorded": True, "path": str(historymod.state_path())}
+    except HistoryError as exc:
+        print(f"{PROG}: could not record this run in history: {exc.what}",
+              file=sys.stderr)
+        if exc.hint:
+            print(f"  next: {exc.hint}", file=sys.stderr)
+        return {"recorded": False, "path": str(historymod.state_path()),
+                "warning": exc.what}
 
 
 def _cmd_run(args) -> int:
@@ -484,9 +538,26 @@ def _cmd_run(args) -> int:
             source=entry.source)
     exit_code = comparison.exit_code()
 
+    finished = time.time()
+    history_block = _write_history(historymod.RunRecord(
+        repo=entry.repo,
+        status="pass" if exit_code == EXIT_PASS else "diff_mismatch",
+        exit_code=exit_code,
+        started_at=historymod.iso(started),
+        finished_at=historymod.iso(finished),
+        duration_ms=int((finished - started) * 1000),
+        snapshot=snapshot.short_id,
+        file_count=man.file_count,
+        total_bytes=man.total_bytes,
+        diff_count=(len(comparison.errors) if comparison.enabled else None),
+        digest=sample.digest,
+        tool_version=__version__,
+        schema=SCHEMA_VERSION,
+    ))
+
     if args.json:
         print(json.dumps(_run_payload(entry, snapshot, man, sample, comparison,
-                                      restore_root, elapsed, cleaned),
+                                      history_block, restore_root, elapsed, cleaned),
                          indent=2, ensure_ascii=False))
         return exit_code
 
@@ -552,12 +623,14 @@ def main(argv=None) -> int:
     if not args.command:
         parser.print_help()
         return EXIT_PASS
+    started = time.time()
     try:
         handler = _DISPATCH.get(args.command)
         if handler:
             return handler(args)
         return _pending(args.command, _PENDING[args.command])
     except ConfigError as exc:
+        # exit 64 is a usage problem, not a verification outcome: no run row.
         print(f"{PROG}: {exc.render()}", file=sys.stderr)
         code = exit_code_for(exc)
         _emit_error(kind_of(exc), exc.what, code, command=args.command,
@@ -569,15 +642,18 @@ def main(argv=None) -> int:
         if tail:
             print(f"  restic said: {tail}", file=sys.stderr)
         code = exit_code_for(exc)
+        _record_error_run(args, kind_of(exc), code, started)
         _emit_error(kind_of(exc), exc.what, code, command=args.command,
                     hint=exc.hint, stderr_tail=tail or None)
         return code
     except KeyboardInterrupt:
         print(f"\n{PROG}: interrupted.", file=sys.stderr)
+        code = CODE_BY_KIND["interrupted"]
+        _record_error_run(args, "interrupted", code, started)
         _emit_error("interrupted", "interrupted before the run finished.",
-                    CODE_BY_KIND["interrupted"], command=args.command,
+                    code, command=args.command,
                     hint="re-run when ready; nothing was left behind")
-        return CODE_BY_KIND["interrupted"]
+        return code
 
 
 if __name__ == "__main__":  # pragma: no cover
