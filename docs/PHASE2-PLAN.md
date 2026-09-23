@@ -173,6 +173,7 @@ for shipped code:
 | `tests/test_i2_compare.py::fingerprint()` | proves the source tree is never written to (size + mtime_ns + sha256 before/after) — evidence for R26/R23 | that module's docstring |
 | `tests/test_i2_manifest.py::test_human_bytes_units` | the R29 formatter's contract test (6 parametrised cases) | test docstring names R29 |
 | `tests/conftest.py` `isolated_state` / `_state_base` | every test gets its own durable-state dir (autouse, `RESTVERIFY_STATE`), so the suite can never write the real `~/.local/state/restverify`; the per-session base prefers tmpfs because the store now does a real fsync per write | that fixture's docstring + the I4 briefing |
+| `tests/test_i6_negatives.py` source index (`SHIPPED`, `_trees`, `_imports`, `_dotted_name`, `_env_read_names`, `_literal_strings`, `_spawn_calls`, `_listener_calls`, `_platform_branches`) | turns N3/N4/N5/N7 from prose into assertions: it parses every shipped module and answers "which module imports/spawns/listens/reads X". Deliberately **not** shared with `scripts/security_sweep.py` (I6b) — one broken walker would otherwise silently disable every absence test at once. Non-obvious parts: dynamic `importlib.import_module("x")` arguments count as imports, and only *named* env reads (`os.environ.get("AWS_…")`) count, not `dict(os.environ)` | module docstring + the I6 briefing |
 
 Worked example of the shipped-code rule: `cli.human_bytes()` arrived as an
 unplanned extra during I2 and was **numbered R29** (added to the requirement
