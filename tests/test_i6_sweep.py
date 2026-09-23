@@ -173,3 +173,32 @@ def test_asyncio_is_flagged_for_review_but_not_forbidden(tmp_path):
     code2, out2 = _sweep(_scratch(tmp_path / "second", "import asyncio\nimport socket\n"))
     assert code2 == 1 and "socket" in out2, out2
 
+
+
+# ── the report (docs/SECURITY.md) ─────────────────────────────────────────
+
+REPORT = REPO / "docs" / "SECURITY.md"
+
+
+def test_the_security_report_exists_and_is_not_stale():
+    """I6c: the report exists, names the groups and the blockers, and — the useful
+    half — embeds the *current* sweep verdicts, so it cannot drift away from the
+    tree it claims to describe."""
+    assert REPORT.exists(), f"missing {REPORT}"
+    text = REPORT.read_text(encoding="utf-8")
+    for group in ("R25 zero telemetry", "N3 no cloud SDK / no credentials",
+                  "N4 no web framework / no listener",
+                  "N5 no notification SDK / no webhook", "N7 no Windows code / no GUI"):
+        assert group in text, f"the report does not name {group!r}"
+    for blocker in ("B1", "C1", "B2", "U7"):
+        assert blocker in text, f"the report does not name blocker {blocker}"
+    assert "coming soon" not in text.lower(), "the report must not promise future work"
+    assert REPORT.read_text(encoding="utf-8").count("3148d6b") >= 1, "I6a hash missing"
+    assert text.count("759dec6") >= 1, "I6b hash missing"
+    code, out = _sweep(SRC)
+    assert code == 0, out
+    for line in out.splitlines():
+        if line.lstrip().startswith(("R25", "N3", "N4", "N5", "N7")) and "PASS" in line:
+            assert line in text, f"the report's verdicts are stale, missing: {line!r}"
+    assert "RESULT: PASS — every group clean" in text
+
