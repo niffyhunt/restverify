@@ -74,15 +74,19 @@ def test_help_documents_the_usage_code(capsys):
     assert "64" in out, "the -64 usage code must be documented in --help (U3)"
 
 
-@pytest.mark.parametrize("cmd,ptr", [("cron", "I5")])
-def test_unimplemented_commands_are_honest(cmd, ptr, capsys):
-    """Gate G6: the scaffold must not pretend to work.
+def test_pending_table_is_empty_and_helper_still_teaches(capsys):
+    """Gate G6: nothing in the surface pretends to work.
 
-    `report` was removed from this list at I4b, where it became real.
+    `cron` was the last pending command; it became real at I5a, so the PENDING
+    table must now be empty (`report` left at I4b for the same reason). The
+    teaching helper stays honest for whatever a later increment defers.
     """
-    code = main([cmd])
+    from restverify import cli as climod
+
+    assert climod._PENDING == {}, "every parser command must be implemented"
+    code = climod._pending("futurecmd", "I9")
     err = capsys.readouterr().err
     assert code != EXIT_PASS
     assert "not implemented" in err
-    assert ptr in err
+    assert "I9" in err
     assert "docs/PHASE2-PLAN.md" in err

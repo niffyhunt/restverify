@@ -262,18 +262,49 @@ def build_parser() -> argparse.ArgumentParser:
     p_cron = sub.add_parser(
         "cron", help="print a crontab line for a scheduled verification",
         description="Print (never install) a crontab line you can paste.",
-        epilog="examples:\n  restverify cron\n  restverify cron -r /srv/backup",
+        epilog="examples:\n"
+               "  restverify cron -r /srv/backup             print a crontab line\n"
+               "  restverify cron -r backup --json           machine-readable envelope\n"
+               "  restverify cron -r /srv/backup --systemd   .service + .timer pair\n"
+               "\nschedule expression:\n"
+               "  the line begins with the five crontab time fields (minute hour day\n"
+               "  month weekday). restverify prints one example cadence and does not\n"
+               "  choose a schedule for you: change the fields to your own rhythm.\n"
+               "  the line logs human output; append --json to the `run` command inside\n"
+               "  the line yourself if you want machine-readable cron logs (the flag on\n"
+               "  THIS command only decides how cron's own output is formatted).\n"
+               "\nthis command prints; it never installs:\n"
+               "  no crontab is modified, systemctl is never called, and nothing is\n"
+               "  written into any unit directory. Paste the line into `crontab -e`,\n"
+               "  or save the units yourself at the privilege level you choose.\n"
+               "  a scheduler runs with a minimal environment, so set\n"
+               "  RESTIC_PASSWORD_COMMAND (or RESTIC_PASSWORD_FILE) there; restverify\n"
+               "  never stores your password.\n"
+               "\njson envelope (--json):\n"
+               "  one object on stdout, schema 1, command \"cron\", status \"cron\";\n"
+               "  same top-level keys as run and report. cron carries repo, binary,\n"
+               "  schedule, line, installs (always false) and notes; with --systemd it\n"
+               "  also carries systemd.service and systemd.timer. Teaching text goes to\n"
+               "  stderr in human mode and is carried in cron.notes for --json, so\n"
+               "  stdout stays a single valid object.\n"
+               "\nwithout -r:\n"
+               "  the line carries the placeholder '<repo>' and says so - a guess at\n"
+               "  your repository would be worse than a placeholder.\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    p_cron.add_argument("-r", "--repo", metavar="PATH", help="restic repository")
+    p_cron.add_argument("-r", "--repo", metavar="PATH",
+                        help="restic repository (or a repo name saved in the config)")
+    p_cron.add_argument("--systemd", action="store_true",
+                        help="print a .service + .timer pair instead of a crontab line "
+                             "(prints only; never installs)")
     _add_common(p_cron)
     return parser
 
 
 def _note_json_deferred(args) -> None:
-    """G6: this command's --json is deferred (ruling 4) and must not fake a schema.
+    """G6: `init`'s --json is still deferred and must not fake a schema.
 
-    `run` is the only JSON surface completed by I3; init/report/cron arrive in
-    their own increments.
+    `run` (I3), `report` (I4b) and `cron` (I5a) are real JSON surfaces; `init`
+    arrives in its own increment.
     """
     if getattr(args, "json", False):
         print(f"{PROG}: --json is not implemented for this command yet; "
@@ -764,10 +795,170 @@ def _cmd_report(args) -> int:
     return EXIT_PASS
 
 
+# ── cron (I5a) ──────────────────────────────────────────────────────────────
+#
+# Doctrine for this command: it PRINTS, it never installs. It renders text for
+# the operator to paste; it must not touch a crontab, call systemctl, or write
+# into any unit directory. The tests assert exactly that, and the I5 security
+# self-check greps this module for the calls that would break it.
+
+EXAMPLE_SCHEDULE = "0 3 * * *"          # one example cadence (ruling R4: neutral)
+SYSTEMD_SERVICE_HEADER = "# ----- restverify.service -----"
+SYSTEMD_TIMER_HEADER = "# ----- restverify.timer -----"
+
+
+def _cron_binary() -> str:
+    """The absolute path a scheduler should call.
+
+    An absolute path is not decoration: cron runs with a minimal PATH, so a bare
+    `restverify` is the classic scheduled-job failure. When the console script is
+    not installed (running from a checkout) this falls back to
+    `<python> -m restverify`, which is the same entry point.
+    """
+    found = shutil.which(PROG)
+    if found:
+        return os.path.abspath(found)
+    return f"{os.path.abspath(sys.executable)} -m restverify"
+
+
+def _cron_repo(args) -> tuple[str, bool]:
+    """Return (repo, resolved).
+
+    A saved config name resolves to its repository path, same as `run`/`report`.
+    With no -r the line carries the literal placeholder `<repo>` and the caller
+    says so in the notes — a guess would be worse than a placeholder.
+    """
+    raw = getattr(args, "repo", "") or ""
+    if not raw:
+        return "<repo>", False
+    try:
+        entry = cfgmod.load_config(args.config).find(raw)
+    except RestverifyError:
+        entry = None
+    if entry is not None:
+        return entry.repo, True
+    return raw, True
+
+
+def _cron_line(binary: str, repo: str) -> str:
+    """The one crontab line: five time fields, then the command.
+
+    `--json` is deliberately NOT appended here even when the caller asked for the
+    JSON envelope: output format must not change what the scheduled job does
+    (I3 ruling 2). The help text documents that an operator who wants
+    machine-readable cron logs appends `--json` to the `run` command themselves.
+    """
+    return f"{EXAMPLE_SCHEDULE} {binary} run -r {repo}"
+
+
+def _systemd_units(binary: str, repo: str) -> tuple[str, str]:
+    """(.service, .timer) as INI text — returned, never written.
+
+    The two units are separated by the header comments above, so each half parses
+    on its own (the test splits on them and parses both with configparser).
+    """
+    exec_line = f"{binary} run -r {repo}"
+    service = "\n".join([
+        "[Unit]",
+        f"Description=restverify scheduled verification ({repo})",
+        "",
+        "[Service]",
+        "Type=oneshot",
+        f"ExecStart={exec_line}",
+        "# restverify never stores your password: give the scheduler the secret.",
+        "# Environment=RESTIC_PASSWORD_COMMAND=/usr/bin/pass show restic/backup",
+        "",
+    ])
+    timer = "\n".join([
+        "[Unit]",
+        "Description=Run restverify on a schedule (set OnCalendar to your rhythm)",
+        "",
+        "[Timer]",
+        "OnCalendar=*-*-* 03:00:00",
+        "Persistent=true",
+        "",
+        "[Install]",
+        "WantedBy=timers.target",
+        "",
+    ])
+    return service, timer
+
+
+def _cron_notes(repo: str, resolved: bool) -> list[str]:
+    """The teaching text. Human mode writes it to stderr; --json carries it in
+    the envelope instead, so stdout stays a single pure object (I3 contract)."""
+    notes = [
+        f"example cadence '{EXAMPLE_SCHEDULE}': change the five time fields to your "
+        "own rhythm — restverify does not choose a schedule for you",
+        "a scheduler runs with a minimal environment: set RESTIC_PASSWORD_COMMAND "
+        "(or RESTIC_PASSWORD_FILE) there, because restverify never stores your password",
+        "this command prints and never installs: paste the line into `crontab -e` "
+        "(or save the units yourself, at the privilege level you choose)",
+        "prefer a systemd timer? add --systemd for a .service + .timer pair",
+    ]
+    if not resolved:
+        notes.insert(0, "no repository given: the line carries the placeholder "
+                        "'<repo>' — pass -r <path>, or -r <name> for a saved repo")
+    return notes
+
+
+def _cron_payload(binary: str, repo: str, resolved: bool,
+                  systemd: bool) -> dict:
+    """command="cron", status="cron": printing a schedule is not a verification."""
+    payload = {
+        "tool": PROG,
+        "schema": SCHEMA_VERSION,
+        "version": __version__,
+        "command": "cron",
+        "status": "cron",
+        "exit_code": EXIT_PASS,
+        "cron": {
+            "repo": None if repo == "<repo>" else repo,
+            "repo_resolved": resolved,
+            "binary": binary,
+            "schedule": EXAMPLE_SCHEDULE,
+            "line": _cron_line(binary, repo),
+            "installs": False,
+            "systemd": None,
+            "notes": _cron_notes(repo, resolved),
+        },
+    }
+    if systemd:
+        service, timer = _systemd_units(binary, repo)
+        payload["cron"]["systemd"] = {"service": service, "timer": timer}
+    return payload
+
+
+def _cmd_cron(args) -> int:
+    """R15: render a schedule for the operator to install themselves."""
+    binary = _cron_binary()
+    repo, resolved = _cron_repo(args)
+    systemd = bool(getattr(args, "systemd", False))
+
+    if _JSON_MODE:
+        _emit_json(_cron_payload(binary, repo, resolved, systemd))
+        return EXIT_PASS
+
+    if systemd:
+        service, timer = _systemd_units(binary, repo)
+        print(SYSTEMD_SERVICE_HEADER)
+        print(service, end="")
+        print(SYSTEMD_TIMER_HEADER)
+        print(timer, end="")
+    else:
+        print(_cron_line(binary, repo))
+    for note in _cron_notes(repo, resolved):
+        print(f"  note: {note}", file=sys.stderr)
+    return EXIT_PASS
+
+
 # ── dispatch ────────────────────────────────────────────────────────────────
 
-_DISPATCH = {"init": _cmd_init, "run": _cmd_run, "report": _cmd_report}
-_PENDING = {"cron": "I5"}
+_DISPATCH = {"init": _cmd_init, "run": _cmd_run, "report": _cmd_report,
+             "cron": _cmd_cron}
+# Empty since I5a: `cron` was the last pending command, so every command in the
+# parser is now real (gate G6). The helper below stays for the next increment.
+_PENDING: dict[str, str] = {}
 
 
 def main(argv=None) -> int:
@@ -794,7 +985,7 @@ def main(argv=None) -> int:
         handler = _DISPATCH.get(args.command)
         if handler:
             return handler(args)
-        return _pending(args.command, _PENDING[args.command])
+        return _pending(args.command, _PENDING.get(args.command, "a later increment"))
     except ConfigError as exc:
         # exit 64 is a usage problem, not a verification outcome: no run row.
         print(f"{PROG}: {exc.render()}", file=sys.stderr)
