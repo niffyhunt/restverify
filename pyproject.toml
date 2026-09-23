@@ -15,7 +15,7 @@ restverify = "restverify.cli:main"
 
 [project.optional-dependencies]
 keyring = ["keyring==25.5.0"]
-dev = ["pytest==8.3.4"]
+dev = ["pytest==8.3.4", "build==1.6.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/restverify"]
