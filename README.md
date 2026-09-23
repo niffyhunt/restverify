@@ -2,9 +2,9 @@
 
 Rehearse and verify restic restores locally, on a schedule, with a diff-proof report.
 
-> **Status: pre-release scaffold (Phase 2).** Commands are wired and documented but
-> not yet implemented; running one says which increment implements it. Do not rely
-> on this for real verification yet.
+> **Status: pre-release (Phase 2, increment I5).** `run`, `report` and `cron` are
+> implemented; `init --json` is still deferred. Not yet release-ready: real-repo
+> validation lands in I7, so verify with a repo you can afford to rehearse on.
 
 ## Why
 
@@ -30,6 +30,23 @@ Requires Python 3.11+ and a `restic` binary on PATH.
 ```bash
 restverify run -r /srv/backup
 ```
+
+The run line keeps the Phase-2 field order — `✓ restored snapshot <id>: N files / X
+in Ys; N diffs` — rather than the PDF's example order; three increments of
+regression tests pin this order and the rewrite was cosmetic (I5 ruling R1).
+
+## Scheduled verification
+
+```bash
+restverify cron -r /srv/backup            # one ready-to-paste crontab line
+restverify cron -r /srv/backup --systemd  # a .service + .timer pair instead
+```
+
+`cron` **prints and never installs**: no crontab is modified, `systemctl` is never
+called, and nothing is written into any unit directory. It prints one example
+cadence and leaves the schedule to you. A scheduler runs with a minimal
+environment, so set `RESTIC_PASSWORD_COMMAND` (or `RESTIC_PASSWORD_FILE`) there —
+restverify never stores your password.
 
 ## History
 

@@ -393,6 +393,8 @@ def _cmd_init(args) -> int:
         print("  note: no password_command saved; set RESTIC_PASSWORD_COMMAND or "
               "re-run init with --password-command")
     print(f"\nnext: restverify run -r {entry.name}")
+    print(f"      restverify cron -r {entry.name}"
+          "   # prints a crontab line for a scheduled check (it installs nothing)")
     return EXIT_PASS
 
 
