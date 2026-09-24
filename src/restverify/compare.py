@@ -170,7 +170,6 @@ def _structure_warnings(restored_man, source_man) -> list[Diff]:
 
 def compare(restored_man, restored_sample, source_root, patterns=(), strict=False) -> Comparison:
     """Compare a restored tree against its source, honouring the same excludes."""
-    matcher = excludesmod.compile_matcher(patterns)
     source_path = Path(str(source_root)).expanduser()
     if not source_path.exists():
         raise SourceError(
@@ -184,6 +183,9 @@ def compare(restored_man, restored_sample, source_root, patterns=(), strict=Fals
             hint="point -s/--source at the directory the snapshot was taken from, "
                  "or pass --no-source",
         )
+    # The matcher is rooted at the source so it reproduces restic's own pattern
+    # semantics against the same absolute paths restic filtered (I7b).
+    matcher = excludesmod.compile_matcher(patterns, root=source_path)
     try:
         source_man = manifestmod.build(source_path, exclude=matcher)
     except ManifestError as exc:

@@ -101,13 +101,15 @@ def digest_of(files) -> str:
 
 
 
-def select(entries, patterns=()):
+def select(entries, patterns=(), root=None):
     """Apply the public rule.
 
     Returns ``(chosen, stride, largest, exclude_matches, matched_total, total)``
     where ``chosen`` is sorted by path and ``exclude_matches`` lists the sampled
     files matching the excludes patterns (first EXCLUDE_SAMPLE_CAP by path) -
     the tripwire view, whether or not the file was already stride-selected.
+    ``root`` is the tree the paths are relative to, handed to the matcher so it
+    can reproduce restic's own pattern semantics (see excludes.py, I7b).
     """
     files = sorted((e for e in entries if e.kind == KIND_FILE), key=lambda e: e.path)
     total = len(files)
@@ -127,7 +129,7 @@ def select(entries, patterns=()):
         largest = biggest.path
         chosen[biggest.path] = biggest
 
-    matcher = excludesmod.compile_matcher(patterns)
+    matcher = excludesmod.compile_matcher(patterns, root=root)
     exclude_matches: list[str] = []
     matched_total = 0
     if not matcher.empty:
@@ -173,7 +175,7 @@ def _file_sha256(path: Path) -> str:
 def sample_tree(manifest, root, patterns=()) -> Sample:
     """Hash the selected files of one tree and return the reproducible digest."""
     chosen, stride, largest, exclude_matches, matched_total, total = select(
-        manifest.entries, patterns)
+        manifest.entries, patterns, root=root)
     base = Path(root)
     sampled = [
         SampledFile(path=entry.path, size=entry.size,

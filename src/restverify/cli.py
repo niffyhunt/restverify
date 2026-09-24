@@ -587,11 +587,11 @@ def _cmd_run(args) -> int:
 
     started = time.time()
     snapshot = resticmod.newest_snapshot(entry.repo, password_command, selector)
-    matcher = excludesmod.compile_matcher(entry.excludes)
     with tempstore.restore_dir(entry.repo) as target:
         resticmod.restore(entry.repo, snapshot, target,
                           excludes=entry.excludes, password_command=password_command)
         restore_root = _restored_root(target, snapshot)
+        matcher = excludesmod.compile_matcher(entry.excludes, root=restore_root)
         man = manifestmod.build(restore_root, ignore_top_level=(tempstore.MARKER,),
                                 exclude=matcher)
         sample = samplingmod.sample_tree(man, restore_root, entry.excludes)

@@ -13,7 +13,8 @@ import subprocess
 
 import pytest
 
-from restverify import EXIT_RESTORE_FAIL
+from restverify import (EXIT_RESTORE_FAIL, excludes as excludesmod,
+                        manifest as manifestmod)
 from restverify.cli import main
 from restverify.restic import _hint_for
 
@@ -123,3 +124,77 @@ def test_restore_failure_teaches_with_restic_own_sentence(fake_restic, tmp_base,
     assert "restic restore failed (exit 1)" in err
     assert "failed to find snapshot" in err
     assert "unable to load snapshot" not in err
+
+
+# ── item 5: excludes.py must agree with restic's own matcher ────────────────
+
+# The real probe. Source root /root/i7-scratch/srcB held app.log,
+# cache/blob.bin, data/keep.txt and nested/trace.log; each pattern was passed to
+# `restic restore <id> --exclude <pattern>` and the right column is what restic
+# really left out of the restore (I7 briefing, section 5).
+SOURCE_ROOT = "/root/i7-scratch/srcB"
+SOURCE_FILES = ["app.log", "cache/blob.bin", "data/keep.txt", "nested/trace.log"]
+
+REAL_EXCLUDE_MATRIX = [
+    ("*.log", {"app.log", "nested/trace.log"}),
+    ("data/*.txt", {"data/keep.txt"}),
+    ("srcB/data/*.txt", {"data/keep.txt"}),                      # root-prefixed
+    ("/root/i7-scratch/srcB/data/*.txt", {"data/keep.txt"}),      # absolute
+    ("i7-scratch/srcB/data/*.txt", {"data/keep.txt"}),            # ancestor-prefixed
+    ("keep.txt", {"data/keep.txt"}),
+    ("cache", {"cache/blob.bin"}),
+    ("cache/", {"cache/blob.bin"}),
+    ("*cache*", {"cache/blob.bin"}),
+    ("nested", {"nested/trace.log"}),
+    ("nested/", {"nested/trace.log"}),
+    ("srcB/nested/trace.log", {"nested/trace.log"}),
+    ("*/trace.log", {"nested/trace.log"}),
+    ("srcB/*/trace.log", {"nested/trace.log"}),
+    ("**/trace.log", {"nested/trace.log"}),
+    ("**trace.log", {"nested/trace.log"}),
+    ("srcB/**/*.log", {"app.log", "nested/trace.log"}),           # '**/' spans zero too
+    ("srcB/da*a/keep.txt", {"data/keep.txt"}),
+    ("srcB/data*keep.txt", set()),          # restic: '*' does not cross '/'
+    ("srcB/data?keep.txt", set()),          # restic: '?' does not cross '/'
+]
+
+
+@pytest.mark.parametrize("pattern,excluded", REAL_EXCLUDE_MATRIX,
+                         ids=[p for p, _ in REAL_EXCLUDE_MATRIX])
+def test_matcher_agrees_with_real_restic(pattern, excluded):
+    matcher = excludesmod.compile_matcher([pattern], root=SOURCE_ROOT)
+    assert {rel for rel in SOURCE_FILES if matcher.matches(rel)} == excluded
+
+
+def test_excluded_directory_prunes_its_subtree():
+    matcher = excludesmod.compile_matcher(["cache/"], root=SOURCE_ROOT)
+    assert matcher.matches("cache")              # the directory itself: pruned
+    assert matcher.matches("cache/blob.bin")     # so the walk never descends
+
+
+def test_rootless_matcher_cannot_see_the_absolute_prefix():
+    """The seam is explicit: with no root there is nothing for such a pattern to match."""
+    assert not excludesmod.compile_matcher(["srcB/data/*.txt"]).matches("data/keep.txt")
+    assert excludesmod.compile_matcher(
+        ["srcB/data/*.txt"], root=SOURCE_ROOT).matches("data/keep.txt")
+
+
+def test_source_walk_prunes_exactly_what_restic_pruned(tmp_path):
+    """D-I7-2: a root-prefixed pattern used to leave the pruned file in the
+    source manifest, so a healthy restore was reported as a mismatch (exit 2)."""
+    source = tmp_path / "srcB"
+    (source / "data").mkdir(parents=True)
+    (source / "app.log").write_text("log\n", encoding="utf-8")
+    (source / "data" / "keep.txt").write_text("keep\n", encoding="utf-8")
+    man = manifestmod.build(
+        source, exclude=excludesmod.compile_matcher(["srcB/data/*.txt"], root=source))
+    assert [e.path for e in man.entries] == ["app.log"]
+    assert man.excluded == ["data/keep.txt"]
+
+
+def test_malformed_pattern_is_a_literal_not_a_crash():
+    """A hostile or half-written glob must not raise out of the matcher."""
+    matcher = excludesmod.compile_matcher(["[unterminated", "keep[", "*.txt"],
+                                          root=SOURCE_ROOT)
+    assert not matcher.matches("app.log")
+    assert matcher.matches("data/keep.txt")     # only the real pattern bites
