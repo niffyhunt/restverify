@@ -99,12 +99,16 @@ REVIEW NOTES (flagged by the sweep, not forbidden by any requirement)
   asyncio    absent    not a network module, but suspicious in a single-threaded CLI
 
 CROSS-CHECK
-  grep found 19 import statements; AST walk found 22 distinct modules
+  grep found 20 import statements; AST walk found 23 distinct modules
   grep roots the AST walk did not see: none
   grep subset of AST: yes
 
 RESULT: PASS — every group clean
 ```
+
+Refreshed at I7c: the counts moved from 19/22 to 20/23 because `excludes.py` now
+imports `re` for restic's glob semantics (I7b-3). `re` is stdlib, so third-party
+and network stay at none and every verdict above is unchanged.
 
 ## 3. The adversarial proof (I6b)
 
@@ -180,15 +184,22 @@ appears); `tempstore.py` owns the temp area; `history.py` owns durable state;
 `config.py` owns config. I6 added no writer, no dependency and no code path that emits
 an exit code — 260 → 267 tests are tests-only changes plus the sweep script.
 
-## 6. Standing blockers (unchanged)
+## 6. Standing blockers
 
-- **B1 open** — no real `restic` binary has been exercised; the suite and the smoke
-test use the fake harness. I7 owns real-repo validation.
+- **B1 CLOSED at I7a** — a real `restic` 0.16.4 (Ubuntu package
+  `0.16.4-2ubuntu0.24.04.3`, go1.22.2) was installed on the operator-ruled I7 host
+  `vmi3416386` and exercised against two real repositories, eight commands, exit
+  codes 0/0/0/0/2/0/1/1 as specified. Three fake-vs-real assumptions were wrong
+  and corrected in I7b (hint selection, the fake's exit codes, the exclude
+  matcher); the full transcript is in `restverify-I7-briefing.md` §4–5.
 - **C1 awaiting** — PyYAML remains unused, TOML via `tomllib` stays; `dependencies = []`
 is asserted by test.
 - **B2 resolved at I5c** — pipx 1.4.3, wheel install, fresh-install dry run PASS.
-- **U7 not measured** — install-to-value under five minutes is I7's proof; the install
-path it will time exists as of I5c.
+Re-measured on the I7 host at I7c with the same pipx 1.4.3.
+- **U7 MEASURED at I7c** — install-to-first-verified-run on the I7 host: pipx install
+6.84 s + `restverify init` 0.07 s + first `restverify run` 1.31 s = **8.22 s**
+(asciicast span 8.62 s), against a target of under five minutes. No test reads a
+clock to assert this; the measurement is a pasted transcript, not an assertion.
 
 ## 7. The Go companion (roadmap context, no code here)
 

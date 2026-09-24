@@ -103,6 +103,14 @@ Scaffolding + test infrastructure only may precede the GO gate below.
 | `brew` | absent (Linux) | Homebrew formula can be authored, not verified here — see C5 |
 | `pdftotext` | present | PDF read in full (232 lines extracted) |
 
+**I7 ran elsewhere.** The table above audits the *primary* build box, and on that
+box `restic`, `pipx` and `asciinema` are all still absent, so the rows stand. The
+operator ruled I7 onto the second host `vmi3416386` (the cowrie box), where
+`restic 0.16.4` (package `0.16.4-2ubuntu0.24.04.3`), `pipx 1.4.3` and
+`asciinema 2.4.0` were installed with authorisation, and the checkout stayed here
+as the single source of truth (the wheel was built and committed here, then
+installed on that host). Evidence: `restverify-I7-briefing.md` §1 and §6.
+
 ### Git state (2.0.2 requires a clean tree + recorded base commit)
 
 The two products are **standalone repos** (Gate F: one repo, one job). They are
