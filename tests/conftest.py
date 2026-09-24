@@ -36,6 +36,12 @@ FAKE_TREE_JSON = json.dumps({
 })
 
 FAKE_RESTIC = '''#!/usr/bin/env python3
+# Provenance (I7b): every failure string and exit code below was copied from a
+# real restic 0.16.4 run on 2026-09-24. restic exits 1 for a wrong password, a
+# missing repository and a missing snapshot alike; before I7b this fake invented
+# 12, 10 and 3 and worded the restore failure as "unable to load snapshot",
+# which restic does not emit. No shipped code branched on those numbers and no
+# test asserted them, so the fiction was invisible until a real binary ran.
 import json, os, sys
 
 LOG = os.environ.get("FAKE_RESTIC_LOG")
@@ -50,10 +56,12 @@ verb = args[0] if args else ""
 if verb == "snapshots":
     if mode == "wrong_password":
         print("Fatal: wrong password or no key found", file=sys.stderr)
-        sys.exit(12)
+        sys.exit(1)
     if mode == "no_such_repo":
         print("Fatal: unable to open config file: stat /nope: no such file or directory", file=sys.stderr)
-        sys.exit(10)
+        print("Is there a repository at the following location?", file=sys.stderr)
+        print("/nope", file=sys.stderr)
+        sys.exit(1)
     if mode == "badjson":
         print("this is not json")
         sys.exit(0)
@@ -78,8 +86,8 @@ if verb == "restore":
     for rel, dest in TREE["links"].items():
         os.symlink(dest, os.path.join(target, rel))
     if mode == "fail_restore":
-        print("Fatal: unable to load snapshot 9f3a2c00", file=sys.stderr)
-        sys.exit(3)
+        print("Fatal: failed to find snapshot: no matching ID found for prefix \\"9f3a2c00\\"", file=sys.stderr)
+        sys.exit(1)
     print("restored")
     sys.exit(0)
 

@@ -9,6 +9,10 @@ listed item by item in section 5 of the I7 briefing.
 No test here needs a real restic binary: the fake in conftest.py speaks restic's
 own words and exit codes, so the suite stays offline and deterministic.
 """
+import subprocess
+
+import pytest
+
 from restverify import EXIT_RESTORE_FAIL
 from restverify.cli import main
 from restverify.restic import _hint_for
@@ -69,3 +73,53 @@ def test_missing_repo_run_teaches_the_path_end_to_end(fake_restic, tmp_base,
     assert "check the repository path" in err
     assert "password looks wrong" not in err
     assert "restic said:" in err
+
+
+# ── item 2: restic's real exit codes (the fake used 3 / 10 / 12) ─────────────
+
+# verb + arguments that trigger each fake failure mode, and the exact stderr the
+# real binary printed for the same failure on 2026-09-24. Target paths are
+# formatted per test so the fake writes inside tmp_path.
+REAL_FAILURES = {
+    "wrong_password": (
+        ["snapshots", "--json", "--repo", "/srv/backup"],
+        "Fatal: wrong password or no key found",
+    ),
+    "no_such_repo": (
+        ["snapshots", "--json", "--repo", "/srv/backup"],
+        "Fatal: unable to open config file: stat /nope: no such file or directory\n"
+        "Is there a repository at the following location?\n"
+        "/nope",
+    ),
+    "fail_restore": (
+        ["restore", "9f3a2c00", "--target", "{target}", "--repo", "/srv/backup"],
+        'Fatal: failed to find snapshot: no matching ID found for prefix "9f3a2c00"',
+    ),
+}
+
+
+def _run_fake(fake_restic, mode, *args):
+    fake_restic.set_mode(mode)
+    return subprocess.run([str(fake_restic.path), *args], capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("mode", sorted(REAL_FAILURES))
+def test_fake_restic_failures_exit_1_and_speak_restic_words(fake_restic, mode, tmp_path):
+    """The fake must not invent exit codes: restic 0.16.4 returns 1 for all three."""
+    args, expected_stderr = REAL_FAILURES[mode]
+    args = [a.format(target=str(tmp_path / "restore")) for a in args]
+    proc = _run_fake(fake_restic, mode, *args)
+    assert proc.returncode == 1, f"real restic exits 1 for {mode}"
+    assert proc.stderr.strip() == expected_stderr
+
+
+def test_restore_failure_teaches_with_restic_own_sentence(fake_restic, tmp_base,
+                                                          config_path, capsys):
+    """End to end: the tool quotes restic's real words, not the old fiction."""
+    fake_restic.set_mode("fail_restore")
+    code = main(["run", "-r", "/srv/backup"])
+    err = capsys.readouterr().err
+    assert code == EXIT_RESTORE_FAIL
+    assert "restic restore failed (exit 1)" in err
+    assert "failed to find snapshot" in err
+    assert "unable to load snapshot" not in err
