@@ -97,13 +97,31 @@ def run(args: list[str], password_command: str | None = None, timeout: int | Non
 
 
 def _hint_for(stderr: str) -> str:
-    """U2b: name the most likely cause, from restic's own words."""
+    """U2b: name the most likely cause, from restic's own words.
+
+    The order of these tests is load-bearing and was corrected in I7b against
+    a real restic 0.16.4. A missing repository is reported as
+
+        Fatal: unable to open config file: stat <repo>/config: no such file or
+        directory
+        Is there a repository at the following location?
+        <repo>
+
+    which contains "unable to open config" - the substring the password branch
+    used to claim first, so a typo'd repo path was taught as a wrong password.
+    Path evidence is therefore checked before password evidence. The password
+    branch keeps "unable to open config" for older builds that append "wrong
+    password or no key found" to that same line, and restic 0.16.4's own
+    password failure ("Fatal: wrong password or no key found") contains no path
+    wording, so the two can no longer be confused.
+    """
     low = stderr.lower()
+    if ("is there a repository at" in low or "does not exist" in low
+            or "no such file" in low):
+        return "check the repository path: `restic -r <repo> snapshots` by hand"
     if "wrong password" in low or "invalid password" in low or "unable to open config" in low:
         return ("the repository password looks wrong — set password_command in the "
                 "config (never the password itself), or export RESTIC_PASSWORD_COMMAND")
-    if "does not exist" in low or "no such file" in low:
-        return "check the repository path: `restic -r <repo> snapshots` by hand"
     if "permission denied" in low:
         return "check read permissions on the repository for this user"
     if "no such host" in low or "connection refused" in low or "timeout" in low:
