@@ -455,20 +455,28 @@ def _restored_root(target, snapshot):
 
     `restic restore <id> --target <dir>` recreates the snapshot's absolute
     paths *under* the target, so a source comparison needs that subtree, not
-    the target itself. Any candidate that resolves outside the target is
-    refused: repository metadata must not be able to aim our walk at arbitrary
-    filesystem paths.
+    the target itself. The strip rule is restic's own, and it is not uniform:
+    POSIX paths keep their shape (`/srv/data` lands at `target/srv/data`),
+    while a Windows path lands under just its last component (`C:\\...\\src`
+    was measured to land at `target/src`, restic 0.19.1). Rather than fork
+    the logic per platform, each path is tried as progressively shorter
+    suffixes - longest first - and the first existing directory wins. Every
+    candidate stays inside the target, so repository metadata cannot aim our
+    walk at arbitrary filesystem paths.
     """
     base = Path(target).resolve()
     for raw in snapshot.paths or []:
-        candidate = Path(target) / str(raw).lstrip("/")
-        try:
-            resolved = candidate.resolve()
-            resolved.relative_to(base)
-        except (OSError, ValueError):
-            continue
-        if resolved.is_dir():
-            return resolved
+        parts = [p for p in Path(str(raw)).parts
+                 if p not in ("/", "\\") and not p.endswith((":\\", ":/"))]
+        for start in range(len(parts)):
+            candidate = Path(target).joinpath(*parts[start:])
+            try:
+                resolved = candidate.resolve()
+                resolved.relative_to(base)
+            except (OSError, ValueError):
+                continue
+            if resolved.is_dir():
+                return resolved
     return Path(target)
 
 
@@ -965,6 +973,18 @@ _PENDING: dict[str, str] = {}
 
 def main(argv=None) -> int:
     global _JSON_MODE, _RAW_ARGV, _PRUNE_ANNOUNCED
+    # A legacy console or redirect codepage (Windows cp1252/cp437) cannot
+    # encode the output glyphs ("\u2713" / "\u2717") and argparse would die
+    # printing its own help. Pin UTF-8 with replacement so output can never
+    # raise on encode; stream objects without reconfigure (test captures,
+    # exotic wrappers) are left alone.
+    for _stream in (sys.stdout, sys.stderr):
+        _reconfigure = getattr(_stream, "reconfigure", None)
+        if _reconfigure is not None:
+            try:
+                _reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
     raw = list(sys.argv[1:] if argv is None else argv)
     _JSON_MODE = _wants_json(raw)      # ruling 2: format decision only
     _RAW_ARGV = raw

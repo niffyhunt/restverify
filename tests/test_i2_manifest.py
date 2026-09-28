@@ -15,6 +15,7 @@ from restverify import EXIT_PASS, manifest as manifestmod
 from restverify.cli import _restored_root, human_bytes, main
 from restverify.errors import ManifestError
 from restverify.restic import Snapshot
+from conftest import symlinks_supported
 
 
 def plant(root: Path) -> Path:
@@ -23,7 +24,10 @@ def plant(root: Path) -> Path:
     (root / "empty-dir").mkdir()
     (root / "restored.txt").write_text("hello", encoding="utf-8")      # 5 B
     (root / "sub" / "nested.bin").write_bytes(b"\0" * 1500)            # 1500 B
-    (root / "link").symlink_to("restored.txt")
+    if symlinks_supported():
+        (root / "link").symlink_to("restored.txt")
+    # On hosts where symlink creation is not permitted (non-elevated Windows)
+    # the link entry is omitted; tests can adapt via symlinks_supported().
     return root
 
 
@@ -33,7 +37,7 @@ def test_counts_and_bytes_are_exact(tmp_path):
     man = manifestmod.build(plant(tmp_path / "tree"))
     assert man.file_count == 2
     assert man.total_bytes == 1505
-    assert man.symlink_count == 1
+    assert man.symlink_count == (1 if symlinks_supported() else 0)
     assert man.other_count == 0
     assert man.directory_count == 3          # "" + sub + empty-dir
     assert man.max_depth == 1
@@ -207,7 +211,8 @@ def test_run_human_line_reports_counts_and_size(fake_restic, tmp_base, config_pa
     assert code == EXIT_PASS
     assert "\u2713 restored snapshot 9f3a2c00: 2 files / 1.5 KiB in" in out
     assert "max depth 1" in out
-    assert "1 symlink(s) (recorded-not-followed)" in out
+    links = 1 if symlinks_supported() else 0
+    assert f"{links} symlink(s) (recorded-not-followed)" in out
     assert "arrive in increment I2" not in out
 
 
@@ -222,7 +227,7 @@ def test_json_run_emits_manifest_compare_and_schema(
     man = payload["manifest"]
     assert man["file_count"] == 2
     assert man["total_bytes"] == 1505
-    assert man["symlink_count"] == 1
+    assert man["symlink_count"] == (1 if symlinks_supported() else 0)
     assert man["symlink_policy"] == "recorded-not-followed"
     assert man["largest_file"]["path"] == "sub/nested.bin"
     assert man["ignored"] == [".restverify-marker"]   # our marker, not restored data

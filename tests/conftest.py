@@ -84,7 +84,10 @@ if verb == "restore":
     for rel in TREE["dirs"]:
         os.makedirs(os.path.join(target, rel), exist_ok=True)
     for rel, dest in TREE["links"].items():
-        os.symlink(dest, os.path.join(target, rel))
+        try:
+            os.symlink(dest, os.path.join(target, rel))
+        except OSError:
+            pass  # no symlink privilege (non-elevated Windows): omit it
     if mode == "fail_restore":
         print("Fatal: failed to find snapshot: no matching ID found for prefix \\"9f3a2c00\\"", file=sys.stderr)
         sys.exit(1)
@@ -96,6 +99,87 @@ sys.exit(1)
 '''.replace("__FAKE_TREE__", f"json.loads({FAKE_TREE_JSON!r})")
 
 
+_SYMLINK_SKIP_TESTS = frozenset({
+    # These assert symlink semantics end-to-end, so they can only run where
+    # os.symlink is permitted (POSIX; Windows with Developer Mode or admin).
+    "test_symlink_target_difference_is_exit_2",
+    "test_symlinks_are_recorded_not_followed",
+    "test_symlink_targets_are_preserved",
+    "test_symlinked_directory_is_not_descended_into",
+    "test_symlink_swapped_after_the_manifest_is_a_teaching_error",
+})
+
+_SYMLINKS_OK = None
+
+
+def symlinks_supported() -> bool:
+    """Whether os.symlink can actually create a link on this machine.
+
+    Windows only honours symlink creation for elevated processes or with
+    Developer Mode enabled; elsewhere every attempt raises WinError 1314
+    ("A required privilege is not held by the client").
+    """
+    global _SYMLINKS_OK
+    if _SYMLINKS_OK is None:
+        probe = Path(tempfile.mkdtemp(prefix="rv-symlink-probe-"))
+        try:
+            os.symlink("target", probe / "link")
+            _SYMLINKS_OK = True
+        except OSError:
+            _SYMLINKS_OK = False
+        finally:
+            shutil.rmtree(probe, ignore_errors=True)
+    return _SYMLINKS_OK
+
+
+def pytest_collection_modifyitems(config, items):
+    if symlinks_supported():
+        return
+    reason = ("os.symlink is not permitted here "
+              "(Windows: enable Developer Mode or run elevated)")
+    for item in items:
+        if item.name.split("[", 1)[0] in _SYMLINK_SKIP_TESTS:
+            item.add_marker(pytest.mark.skip(reason=reason))
+
+
+def build_win_restic_shim(dest: Path) -> Path:
+    """Write a real ``restic.exe`` that re-enters the fake ``restic`` script.
+
+    Windows specifics that make the POSIX fake unrunnable there as-is:
+
+    * ``shutil.which()`` only matches PATHEXT extensions (.COM/.EXE/.BAT/...),
+      so the extension-less fake named ``restic`` is invisible to the lookup
+      and a real restic.exe on PATH wins instead;
+    * ``CreateProcess`` cannot launch a ``.bat`` shim either (WinError 193),
+      so the shim must be a genuine PE executable.
+
+    pip ships distlib's launcher template for console scripts; this builds a
+    stub the same way pip does: launcher bytes + ``#!`` shebang + a zip whose
+    ``__main__.py`` runs the script named by FAKE_RESTIC_SCRIPT via runpy.
+    """
+    import io as _io
+    import zipfile
+    import pip._vendor.distlib as _distlib
+    launcher = Path(_distlib.__file__).with_name(
+        "t64.exe" if sys.maxsize > 2 ** 32 else "t32.exe")
+    payload = (
+        "import os, runpy, sys\n"
+        "script = os.environ.get('FAKE_RESTIC_SCRIPT')\n"
+        "if not script:\n"
+        "    sys.stderr.write('restic shim: FAKE_RESTIC_SCRIPT not set\\n')\n"
+        "    raise SystemExit(97)\n"
+        "runpy.run_path(script, run_name='__main__')\n"
+    )
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("__main__.py", payload)
+    dest.write_bytes(
+        launcher.read_bytes()
+        + b"#!" + os.fsencode(sys.executable) + b"\n"
+        + buf.getvalue())
+    return dest
+
+
 def plant_fake_tree(root: Path) -> Path:
     """Write the same bytes the fake restic restores into ``root``."""
     for rel, blob in FAKE_FILES.items():
@@ -105,7 +189,10 @@ def plant_fake_tree(root: Path) -> Path:
     for rel in FAKE_DIRS:
         (Path(root) / rel).mkdir(parents=True, exist_ok=True)
     for rel, dest in FAKE_LINKS.items():
-        (Path(root) / rel).symlink_to(dest)
+        if symlinks_supported():
+            (Path(root) / rel).symlink_to(dest)
+        # Without symlink permission (non-elevated Windows) the link entry is
+        # omitted from planted trees; link-specific tests skip themselves.
     return Path(root)
 
 
@@ -134,6 +221,9 @@ def fake_restic(tmp_path, monkeypatch):
     exe = bin_dir / "restic"
     exe.write_text(FAKE_RESTIC, encoding="utf-8")
     exe.chmod(0o755)
+    if os.name == "nt":
+        build_win_restic_shim(bin_dir / "restic.exe")
+        monkeypatch.setenv("FAKE_RESTIC_SCRIPT", str(exe))
     log = tmp_path / "restic.log"
     monkeypatch.setenv("FAKE_RESTIC_LOG", str(log))
     monkeypatch.setenv("FAKE_RESTIC_MODE", "ok")

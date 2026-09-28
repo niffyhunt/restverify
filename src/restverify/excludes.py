@@ -88,7 +88,12 @@ class ExcludeMatcher:
 
     def __init__(self, patterns, root=None) -> None:
         self.patterns = [p for p in (self._normalise(x) for x in patterns or []) if p]
-        self._root = str(root).rstrip("/") if root is not None else ""
+        # The walk root is a filesystem path; the candidate matching below is
+        # defined in POSIX terms (that is restic's own world), so Windows
+        # separators are normalised here or the leading-strip retries never
+        # reach the root-relative form of a pattern.
+        self._root = (str(root).replace("\\", "/").rstrip("/")
+                      if root is not None else "")
         compiled = []
         for pattern in self.patterns:
             compiled.append((pattern, _translate(pattern)))

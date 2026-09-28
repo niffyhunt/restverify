@@ -9,6 +9,7 @@ listed item by item in section 5 of the I7 briefing.
 No test here needs a real restic binary: the fake in conftest.py speaks restic's
 own words and exit codes, so the suite stays offline and deterministic.
 """
+import shutil
 import subprocess
 
 import pytest
@@ -101,7 +102,10 @@ REAL_FAILURES = {
 
 def _run_fake(fake_restic, mode, *args):
     fake_restic.set_mode(mode)
-    return subprocess.run([str(fake_restic.path), *args], capture_output=True, text=True)
+    # Resolve the runnable fake the way the tool itself does: on Windows that
+    # is restic.exe (the extension-less POSIX script cannot be exec'd there).
+    binary = shutil.which("restic") or str(fake_restic.path)
+    return subprocess.run([binary, *args], capture_output=True, text=True)
 
 
 @pytest.mark.parametrize("mode", sorted(REAL_FAILURES))

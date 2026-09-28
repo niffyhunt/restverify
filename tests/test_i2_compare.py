@@ -190,7 +190,7 @@ def test_missing_source_is_a_teaching_error(fake_restic, tmp_base, config_path, 
     err = capsys.readouterr().err
     assert code == EXIT_RESTORE_FAIL
     assert "does not exist" in err
-    assert "/definitely/not/here" in err
+    assert str(Path("/definitely/not/here")) in err
     assert "next:" in err and "--no-source" in err
     assert "Traceback" not in err
 

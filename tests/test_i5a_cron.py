@@ -8,8 +8,10 @@ rather than passing vacuously.
 """
 import configparser
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,7 +42,21 @@ def test_cron_line_uses_an_absolute_binary(capsys):
     main(["cron", "-r", "/srv/backup"])
     line = capsys.readouterr().out.strip()
     command = line.split(None, 5)[5]
-    assert command.split()[0].startswith("/"), command
+    # Absolute on either platform: "/..." on POSIX, "C:\..." on Windows.
+    assert Path(command.split()[0]).is_absolute(), command
+
+
+def test_python_dash_m_fallback_actually_runs():
+    """_cron_binary falls back to `python -m restverify` when running from a
+    checkout, so that invocation has to work: it used to die with
+    "No module named restverify.__main__" on every platform. The forced
+    cp1252 stream also pins the legacy-codepage fix — the help text carries
+    a check-mark glyph a charmap console cannot encode."""
+    env = dict(os.environ, PYTHONIOENCODING="cp1252")
+    proc = subprocess.run([sys.executable, "-m", "restverify", "--help"],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, proc.stderr
+    assert "usage" in proc.stdout.lower()
 
 
 def test_cron_teaching_goes_to_stderr_not_stdout(capsys):

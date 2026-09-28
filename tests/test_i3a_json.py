@@ -17,6 +17,7 @@ No test in this module asserts anything about timing (standing rule a), and no
 test spawns the fake restic more than once per run path (trend guard b).
 """
 import json
+import os
 
 import pytest
 
@@ -101,7 +102,7 @@ def test_missing_source_is_json_1_kind_source(fake_restic, tmp_base, config_path
     assert code == EXIT_RESTORE_FAIL
     payload = pure_json(captured.out)
     assert payload["error"]["kind"] == "source"
-    assert "/definitely/not/here" in payload["error"]["what"]
+    assert os.path.normpath("/definitely/not/here") in payload["error"]["what"]
     assert "next:" in captured.err
 
 
