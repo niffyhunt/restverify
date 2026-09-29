@@ -1,0 +1,164 @@
+# restverify/restore-drill-action — R44 (V2 train, I10).
+#
+# A reusable composite action that exercises the supply chain on itself:
+# it downloads a released, GPG-signed restverify wheel, verifies the
+# signature against the release key shipped with this action, installs it,
+# and runs the two drills that make restore verification a gate:
+#
+#   1. happy drill    — restore + verify a healthy fixture; green exactly
+#                       when restverify exits 0.
+#   2. tampered drill — one byte flipped in the fixture; restverify must
+#                       exit 2 (R11 diff-mismatch) and the step is red.
+#
+# Exit-code contract (R11): this action treats every non-zero exit as a
+# failure via GitHub's own step semantics. It never rewrites exit codes and
+# never swallows them: 0 pass, 1 run could not complete, 2 diff mismatch,
+# 64 usage/config. `set -e` guarantees the code reaches the step result
+# unchanged — the same codes cron/CI users already automate on.
+#
+# Posture kept (docs/SECURITY.md): restverify is installed from the pinned,
+# signed release artefact — never from a moving branch; the only network
+# fetches are the wheel, its detached signature, and the restic apt package;
+# no token beyond the automatic checkout token is used; restore trees are
+# throwaway fixture directories created inside the job workspace.
+#
+# Scope discipline (docs/V2-BUILD-PLAN.md §3, I10 "does NOT"): no marketplace
+# push, no artefact uploads of restore trees, ubuntu runners only, and NO new
+# CLI flags — everything below composes the existing `run`/`report` verbs.
+#
+# Shape pinned by tests/test_i10_ci.py.
+
+name: 'restverify restore-drill'
+description: >
+  Drill a restic backup: download + signature-verify + install restverify,
+  run a restore verification against a fixture, then prove a tampered
+  fixture fails with exit 2.
+author: 'restverify'
+
+inputs:
+  version:
+    description: >
+      restverify release version to install, e.g. 0.2.0. The wheel is
+      downloaded from the release assets of that tag and its detached GPG
+      signature is verified before installation.
+    required: true
+    default: '0.2.0'
+  base_url:
+    description: >
+      Base URL the wheel, its .asc signature and the release key are
+      fetched from. Override to drill from a pre-release location
+      (e.g. a job artefact server) without changing anything else.
+    required: true
+    default: 'https://github.com/wraithwall/restverify/releases/download'
+  release_key:
+    description: >
+      Path to the armored public key the wheel is verified against.
+      Defaults to the release key shipped with this action
+      (docs/release-key.asc). Override only when drilling a pre-release
+      artefact signed by another key you control — the repository's own CI
+      self-test does exactly that with a throwaway job key.
+    required: false
+    default: ''
+  restic_version:
+    description: 'restic version to apt-install before the drill runs.'
+    required: true
+    default: '0.16.4'
+  drill_script:
+    description: >
+      Path to the drill script (relative to the caller's workspace). The
+      template repository ships one at scripts/drill.sh; the script must
+      exit 0 on a healthy fixture and 2 on a tampered one.
+    required: true
+    default: 'scripts/drill.sh'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Check runner (R19 scope: this action supports ubuntu runners only)'
+      if: runner.os != 'Linux'
+      shell: bash
+      run: |
+        echo "::error::restverify/restore-drill supports ubuntu runners only (docs/V2-BUILD-PLAN.md §3); runner.os=${{ runner.os }}"
+        exit 1
+
+    - name: 'Install restic (documented prerequisite, R27)'
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+          "restic=${{ inputs.restic_version }}*"
+
+    - name: 'Download release artefacts'
+      shell: bash
+      run: |
+        set -euo pipefail
+        wheel="restverify-${{ inputs.version }}-py3-none-any.whl"
+        base="${{ inputs.base_url }}/v${{ inputs.version }}"
+        curl --fail --silent --show-error --location --retry 3 \
+          --output "$wheel"          "$base/$wheel"
+        curl --fail --silent --show-error --location --retry 3 \
+          --output "$wheel.asc"      "$base/$wheel.asc"
+
+    - name: 'Verify the wheel signature (I8 release key shipped with this action)'
+      shell: bash
+      run: |
+        set -euo pipefail
+        export GNUPGHOME="$(mktemp -d)"
+        trap 'rm -rf "$GNUPGHOME"' EXIT
+        # The key travels with the action (composite actions can read their
+        # own directory via github.action_path, but not the caller's repo).
+        key_path="${{ inputs.release_key }}"
+        if [ -z "$key_path" ]; then
+          key_path="${{ github.action_path }}/release-key.asc"
+        fi
+        gpg --quiet --import "$key_path"
+        gpg --status-file gpg-status.txt --verify \
+          "restverify-${{ inputs.version }}-py3-none-any.whl.asc" \
+          "restverify-${{ inputs.version }}-py3-none-any.whl"
+        grep -q 'GOODSIG' gpg-status.txt
+        echo "wheel signature: Good signature — installing verified bytes"
+
+    - name: 'Install restverify from the verified wheel'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m pip install --disable-pip-version-check \
+          "restverify-${{ inputs.version }}-py3-none-any.whl"
+        restverify --version
+
+    - name: 'Prepare the drill fixture (restverify init, synthetic backup via restic)'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # init only writes the drill's own config; restic initializes the
+        # throwaway repo and performs the one backup. restverify itself never
+        # backs up (N1).
+        mkdir -p "$RUNNER_TEMP/drill-fixture"
+        printf 'restore-drill fixture — if you can read this in a diff, restore works\n' \
+          > "$RUNNER_TEMP/drill-fixture/canary.txt"
+        printf 'drill-password-never-stored-by-restverify\n' > "$RUNNER_TEMP/drill-pass"
+        chmod 600 "$RUNNER_TEMP/drill-pass"
+        restic -r "$RUNNER_TEMP/drill-repo" init \
+          --password-command "cat '$RUNNER_TEMP/drill-pass'"
+        restverify init -r "$RUNNER_TEMP/drill-repo" \
+          -s "$RUNNER_TEMP/drill-fixture" \
+          --password-command "cat '$RUNNER_TEMP/drill-pass'"
+        restic -r "$RUNNER_TEMP/drill-repo" backup "$RUNNER_TEMP/drill-fixture" \
+          --password-command "cat '$RUNNER_TEMP/drill-pass'"
+
+    - name: 'Happy drill — healthy fixture must exit 0'
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash "${{ github.workspace }}/${{ inputs.drill_script }}" \
+          "$RUNNER_TEMP/drill-repo" "$RUNNER_TEMP/drill-fixture" happy
+        # drill.sh asserts exit 0 == 0 itself; reaching here is green.
+
+    - name: 'Tampered drill — one flipped byte must exit 2 (R11)'
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash "${{ github.workspace }}/${{ inputs.drill_script }}" \
+          "$RUNNER_TEMP/drill-repo" "$RUNNER_TEMP/drill-fixture" tamper
+        # drill.sh asserts exit 2 == 2 itself; reaching here is green.

@@ -1,0 +1,63 @@
+# Scheduled restore-drill for a restic repository — I10 (R44) template.
+#
+# Copy this file into your repository at .github/workflows/restore-drill.yml
+# (that is the whole setup — restverify installs nothing itself, R15/R18
+# posture). The nightly job drills a real repository of yours; a healthy
+# backup restores and verifies (exit 0, job green); a degraded one exits 2
+# and the job goes red before you ever need the backup for real.
+#
+# What to edit before committing:
+#   repo:      your restic repository location (any backend restic supports —
+#              local path, SFTP, rclone). Keep it a secret if it is remote:
+#              store it via gh secret set RESTVERIFY_REPO.
+#   password:  restverify never stores passwords (R2/R24). Give restic its
+#              usual channel: RESTIC_PASSWORD_COMMAND pointing at your secret
+#              store, or RESTIC_PASSWORD_FILE.
+#   source:    delete the `--no-source` placeholder below and pass the
+#              original source path (via a secret) to enable the comparison
+#              leg; keep --no-source if you only want the restore proof.
+#
+# Supply chain: this template uses the reusable composite action shipped in
+# the restverify repository (pinned here to v0.1.0 — move the pin only after
+# verifying the new tag's signature, docs/RELEASE.md). The action downloads
+# the released restverify wheel, verifies its GPG signature against the
+# release key, installs it, and runs the drill. No token beyond checkout.
+#
+# Exit-code contract (R11): 0 pass / 1 run could not complete / 2 diff
+# mismatch / 64 usage-config — the job result mirrors the drill exit.
+
+name: restore-drill
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # nightly, 03:00 UTC — edit to taste
+  workflow_dispatch: {}   # manual runs for setup/debugging
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10     # the plan's gate: the drill must stay under 10 min
+    env:
+      # R43: relocate the whole restverify layout out of the runner's real
+      # home — config and state land under this one subtree.
+      RESTVERIFY_HOME: ${{ runner.temp }}/rv-home
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore-drill (happy fixture proof + your repository)
+        uses: wraithwall/restverify/.github/actions/restore-drill@v0.1.0
+        with:
+          version: '0.1.0'
+          # base_url: override if your release lives elsewhere
+          # restic_version: '0.16.4'
+          # drill_script: scripts/drill.sh (copied from restverify templates/)
+
+      - name: Drill your repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RESTIC_PASSWORD_COMMAND="${{ secrets.RESTIC_PASSWORD_COMMAND }}"
+          restverify run -r "${{ secrets.RESTVERIFY_REPO }}" --no-source

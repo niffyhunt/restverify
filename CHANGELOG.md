@@ -1,6 +1,35 @@
 # Changelog
 
 ## [Unreleased]
+### Added — I10: CI restore-drill (R44) — the drill ships as a GitHub Action
+- **Reusable composite action** `.github/actions/restore-drill/`: apt-installs
+  restic, downloads the **released** restverify wheel pinned to a literal
+  `x.y.z`, verifies its GPG signature against the release key that ships
+  with the action (a copy of `docs/release-key.asc` — a composite action can
+  read its own directory, not the caller's repo), installs it, and runs two
+  drills: a healthy fixture must exit 0 and a tampered fixture must exit 2.
+  No token beyond checkout, no secrets, no artefact uploads, ubuntu runners
+  only, **no new CLI flag** — everything composes the existing
+  `run`/`init`/`--version` verbs (pinned by test).
+- **`templates/ci-drill/`**: a scheduled nightly drill workflow for a user's
+  repository (cron + `workflow_dispatch`, repo location and password via
+  secrets, action pinned to a tag) and `scripts/drill.sh` — the drill as a
+  standalone script for cron/systemd/any CI, asserting the exit-code
+  contract in both directions and failing a silent drill (a tampered fixture
+  that still exits 0 is the loudest failure there is).
+- **This repo's CI** (`.github/workflows/ci.yml`): builds the wheel from the
+  commit, stages it like a release, signs it with a throwaway job key, and
+  runs the shipped action end to end — CI installs what the commit just
+  built, per the I9 drill-method rule. The real release key never appears.
+- **Local rehearsal on real restic 0.16.4** (`docs/I10-CI.md`): happy drill
+  exit 0 in 1.7 s, tampered exit 2 with the exact diff named, restored
+  fixture exit 0 again, R43 store-location proof passed. Two action defects
+  were caught and fixed by rehearsal (missing `restic init`; `.sig` vs
+  `.asc` signature extension) before they could fail a runner. The drill
+  also caught the operator mislabelling an unrestored fixture as pristine.
+- Hosted-runner leg of the gate (a nightly scheduled drill on a public
+  template repo) **pending operator hosting** — no repo was created or
+  pushed.
 ### Added — I9: restore-drill at scale (B1 residual closes) + R43/R46
 - **Scale drill (gate):** a ≥1 GB / ≥1000-file corpus (1253 files, 1.02 GiB
   logical, unicode names, symlink, sparse file, empty dir) backed up to an

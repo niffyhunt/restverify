@@ -50,6 +50,18 @@ cadence and leaves the schedule to you. A scheduler runs with a minimal
 environment, so set `RESTIC_PASSWORD_COMMAND` (or `RESTIC_PASSWORD_FILE`) there —
 restverify never stores your password.
 
+## CI: the nightly restore-drill
+
+A scheduled GitHub Action that drills your backup ships in this repository
+(`templates/ci-drill/`, R44): it installs restic, downloads and GPG-verifies
+the released restverify wheel, restores and verifies a fixture (exit 0), then
+proves the drill still bites by tampering one byte (exit 2). Copy the
+workflow into your repository, point it at your restic repo via secrets, and
+a degraded backup turns the nightly job red before you ever need it for
+real. The same drill runs outside GitHub as a plain script
+(`templates/ci-drill/scripts/drill.sh`). Transcript and proof:
+`docs/I10-CI.md`.
+
 ## History
 
 Every verification writes one row to a local SQLite store — failures included,

@@ -23,12 +23,15 @@ packages = ["src/restverify"]
 # Sdist is an explicit allowlist, NOT `include everything` — the 0.1.0 sdist
 # accidentally shipped five untracked test transcripts (rv_testrun.txt,
 # testsuite_*.txt; found in docs/VERIFICATION-0.1.0.md). With `paths`, a
-# forgotten file simply does not ship. (I8, R28.)
+# forgotten file simply does not ship. (I8, R28; I10 added .github/ and
+# templates/ so the R44 CI surface ships in source distributions.)
 [tool.hatch.build.targets.sdist]
 include = [
   "pyproject.toml",
   "README.md",
   "CHANGELOG.md",
+  ".github/",
+  "templates/",
   "docs/",
   "scripts/",
   "src/",

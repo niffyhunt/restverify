@@ -1,0 +1,79 @@
+# restverify CI — I10 (R44): the restore-drill exercises itself.
+#
+# This workflow runs the shipped composite action end to end on every push
+# and PR: it builds the wheel from this commit, stages it like a release,
+# signs it with a throwaway key (self-test only — the real release key never
+# leaves the release host, docs/RELEASE.md), and points the action at the
+# staged artefacts via base_url + release_key. Everything else the action
+# does is exactly what a user's drill does: apt restic, signature-verified
+# install, happy drill (exit 0), tampered drill (exit 2).
+#
+# The R43 layout is exercised too: RESTVERIFY_HOME relocates config+state
+# into the job's temp dir and drill.sh asserts the store landed there.
+#
+# Job result IS the exit-code contract (R11): any non-zero drill exit that
+# drill.sh did not expect fails the step, which fails the job.
+#
+# Gate context (docs/V2-BUILD-PLAN.md §2, I10): the nightly drill must stay
+# under 10 minutes — timeout-minutes below is the same bound.
+
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  restore-drill-selftest:
+    name: restore-drill self-test (happy 0 / tamper 2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RESTVERIFY_HOME: ${{ runner.temp }}/rv-home
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 'Build the wheel from this commit and stage it like a release'
+        id: stage
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check build
+          python -m build --wheel
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          mkdir -p "release-staging/v${version}"
+          cp "dist/restverify-${version}-py3-none-any.whl" "release-staging/v${version}/"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "staged restverify-${version}-py3-none-any.whl"
+
+      - name: 'Sign the staged wheel with a throwaway key (self-test only)'
+        run: |
+          set -euo pipefail
+          version="${{ steps.stage.outputs.version }}"
+          export GNUPGHOME="$(mktemp -d)"
+          gpg --batch --pinentry-mode loopback --passphrase '' \
+            --quick-gen-key "restverify self-test <selftest@example.invalid>" rsa3072 sign never
+          # --armor: the action downloads the detached signature as `.asc`,
+          # matching the release convention (docs/RELEASE.md step 7).
+          gpg --batch --pinentry-mode loopback --passphrase '' \
+            --armor --detach-sign --local-user "restverify self-test" \
+            "release-staging/v${version}/restverify-${version}-py3-none-any.whl"
+          gpg --armor --export "restverify self-test" > selftest-key.asc
+          echo "throwaway key exported; staged artefacts:"
+          ls -la "release-staging/v${version}"
+
+      - name: 'Run the shipped composite action against the staged artefact'
+        uses: ./.github/actions/restore-drill
+        with:
+          version: '${{ steps.stage.outputs.version }}'
+          base_url: 'file://${{ github.workspace }}/release-staging'
+          release_key: '${{ github.workspace }}/selftest-key.asc'
+          drill_script: 'templates/ci-drill/scripts/drill.sh'
