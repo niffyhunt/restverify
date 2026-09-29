@@ -1,36 +1,68 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0] — first release — 2026-09-28
 
-### Added — I1: config/contract + restore-to-temp + cleanup-on-exit
-- `config.py`: TOML config at `~/.config/restverify/config.toml` (XDG-aware,
-  `RESTVERIFY_CONFIG` override), multi-repo schema with source, excludes, snapshot
-  selector and `password_command`. A **missing config is not an error** (U1).
-  A config containing a plain `password` key is **refused** with a teaching error
-  rather than silently ignored (R2/R24).
-- `restic.py`: the only module permitted to invoke restic. Read-only verbs only;
-  mutating verbs (`backup`/`forget`/`prune`/`init`/…) raise at the call site, so
-  N1/N2/N6 are enforced in code, not by convention. Missing restic, wrong
-  password, missing repo, timeout and unparsable output each produce a teaching
-  error naming the likely cause and the next command.
-- `tempstore.py`: private (0700) restore dirs carrying an ownership marker;
-  removed on exit, and any leftover whose owning process died is swept by the
-  next run — the only design that survives `kill -9`. Foreign directories are
-  never touched.
-- `cli.py`: `init` (saves/updates a repo, prints the next command) and `run`
-  (`--dry-run` restores nothing and invokes no restic; `--no-source`, `--strict`,
-  `--snapshot` wired). Usage errors exit 64 (see below).
-- Exit codes: `0` verified, `1` run could not complete, `2` diff mismatch,
-  `64` usage/config problem. **64 is an extension of the PDF contract**, which
-  names only 0/1/2 — usage failures are not verification outcomes, so they must
-  not borrow those codes. Documented in `--help`.
-- Tests: 50 (was 12) — happy/failure/adversarial paths, `kill -9` sweep proof,
-  plus absence tests for N1/N2/N6 and the no-network, no-stored-secret rules.
+### Shipped (I1→I7)
+- **Config + contract (I1):** TOML config (`RESTVERIFY_CONFIG` override; U1: a
+  missing config is not an error); a plain `password` key is refused with a
+  teaching error, never silently ignored (R2/R24). `restic.py` is the only
+  module permitted to invoke restic, and only read-only verbs — mutating verbs
+  raise at the call site (N1/N2/N6).
+- **Restore + cleanup (I1):** private (0700) temp dirs carrying ownership
+  markers, removed on exit; leftovers from a killed process are swept by the
+  next run; foreign directories are never touched.
+- **Manifest + comparison (I2):** restored-tree manifest, deterministic sample
+  sha256, excludes-aware source comparison, exit code 2 on drift.
+- **JSON + taxonomy (I3):** `"schema": 1` envelope on every path; stdout stays
+  pure; exhaustive exit-code taxonomy test.
+- **History + report (I4):** SQLite store at the XDG state dir (failures
+  included), `report` trend, 1000-row retention per repository.
+- **Cron (I5):** `cron` / `--systemd` print a line or a unit pair and never
+  install anything.
+- **Security posture (I6):** the negative requirements as executable
+  assertions, the dependency claim as a test, `docs/SECURITY.md` with a
+  staleness test.
+- **Real-repo validation (I7):** fake-restic fidelity (real exit behaviour),
+  missing-repo teaching, restic-glob exclude semantics — **B1 closed**, **U7
+  measured**, and the report can no longer rot.
+- **Native Windows support:** the full suite and the run pipeline work on
+  Windows (real `restic.exe` fixture, symlink-privilege probe, suffix-matched
+  restore root, UTF-8 output pin, and the previously missing
+  `python -m restverify` entry point).
 
-### Known gaps in I1 (honest, per gate G6)
-- No file counts, sizes or sha256 manifest yet (I2); `run` says so on stdout.
-- No source comparison yet (I2); the source is never passed to restic (I1).
-- `--json` is accepted but prints a note that it completes in I3.
+### Standing statuses (long-running items, as of this release)
+- **B1 CLOSED** — a real restic 0.16.4 (Ubuntu `0.16.4-2ubuntu0.24.04.3`) was
+  exercised against two real repositories, eight commands, exit codes
+  0/0/0/0/2/0/1/1; three fake-vs-real assumptions were wrong and were
+  corrected in I7b (transcript: `restverify-I7-briefing.md` §4–5).
+- **U7 MEASURED** — install-to-first-verified-run **8.22 s** (pipx install
+  6.84 s + `restverify init` 0.07 s + first `restverify run` 1.31 s; asciicast
+  span 8.62 s) against a target of under five minutes. Pasted transcript, not
+  a clock assertion.
+- **R28 PARTIAL** — the release checklist (`docs/RELEASE.md`) exists and this
+  release published recorded sha256 hashes for the wheel and sdist, but there
+  is **no signed tag yet** and the artefacts carry no signature. Closing R28
+  (key material, signed tag, signed artefacts) is planned for the next
+  release train.
+- **C1 unchanged** — TOML config via `tomllib` stands; PyYAML remains unused
+  and `dependencies = []` is asserted by test.
+- **B2 RESOLVED** — pipx 1.4.3, wheel install, fresh-install dry-run PASS
+  (I5c; re-measured on the I7 host at I7c).
+
+### What changed for users
+- First public version. Install with `pipx install restverify` (B2 ruling);
+  requires Python 3.11+ and a `restic` binary on PATH.
+- The exit codes are the integration surface: `0` verified, `1` run could not
+  complete, `2` diff mismatch, `64` usage/config — cron/CI act on them; `64`
+  never borrows a verification code.
+- Verification only: bring your own orchestration; restores always go to
+  private temp dirs and your password is never stored.
+
+### Still open (honest)
+- `init --json` is deferred.
+- C1 (PyYAML ruling) remains open.
+- R28: no signed tag yet (see Standing statuses above).
+- Verify with a repo you can afford to rehearse on.
 
 ## [0.1.0.dev0] — Phase 2 scaffold
 - Package layout, CLI surface with full help/examples, exit-code constants,

@@ -2,9 +2,9 @@
 
 Rehearse and verify restic restores locally, on a schedule, with a diff-proof report.
 
-> **Status: pre-release (Phase 2, increment I5).** `run`, `report` and `cron` are
-> implemented; `init --json` is still deferred. Not yet release-ready: real-repo
-> validation lands in I7, so verify with a repo you can afford to rehearse on.
+> **Status: v0.1.0 — first release.** `run`, `report` and `cron` are implemented
+> and verified against real repos; `init --json` is still deferred. Verify with a
+> repo you can afford to rehearse on.
 
 ## Why
 
