@@ -5,7 +5,7 @@ It never creates backups, never runs forget/prune, and never asks for a
 provider account. Passwords are never stored by this tool.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Exit-code contract (PDF, normative). Exposed as constants so tests and
 # callers reference the contract rather than magic numbers.

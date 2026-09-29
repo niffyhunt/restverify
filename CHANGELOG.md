@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+
+## [0.2.0] — the signed-drill release — 2026-09-29
+
+Train I8→I10 of docs/V2-BUILD-PLAN.md (approved); I11 (R45 sandbox) rides
+0.2.1 — stated here, not hidden.
+
 ### Added — I10: CI restore-drill (R44) — the drill ships as a GitHub Action
 - **Reusable composite action** `.github/actions/restore-drill/`: apt-installs
   restic, downloads the **released** restverify wheel pinned to a literal
@@ -63,6 +69,48 @@
 - The sdist is an explicit allowlist: the five stray test transcripts found
   in the published 0.1.0 sdist (`docs/VERIFICATION-0.1.0.md`) can never ship
   again — asserted by regression test.
+
+### Standing statuses (long-running items, as of this release)
+- **B1 CLOSED** — verification validated at scale: a 1.02 GiB / 1253-file
+  corpus over an SFTP backend, run as a non-root user, exit 0 with 0 diffs
+  (`docs/I9-DRILL.md`); the earlier two-repo proof stands at I7a.
+- **R28 CLOSED** — v0.1.0's signed tag was cut retroactively; from 0.2.0 the
+  tag and both artefacts are signed at release time and the public key ships
+  in-repo.
+- **U7 stands at 8.22 s** install-to-first-verified-run (I7c measurement;
+  target was under five minutes).
+- **C1 unchanged** — TOML config via `tomllib` stands; PyYAML remains unused
+  and `dependencies = []` is asserted by test.
+- **R44 hosted leg pending** — the nightly drill's mechanics are proven
+  locally against real restic 0.16.4 (`docs/I10-CI.md`); the scheduled run on
+  a hosted runner awaits the public template repository, which is an operator
+  decision (nothing was created or pushed).
+
+### What changed for users
+- Releases are now signed: `git tag -v` verifies the tag; each artefact has a
+  detached `.asc` signature next to it and its sha256 recorded in the release
+  notes. Verify without a keyserver using `docs/release-key.asc`.
+- `RESTVERIFY_HOME` (new): one variable relocates the whole restverify layout
+  — config and state — for drill/CI users; it beats inherited XDG vars and
+  loses to explicit `RESTVERIFY_CONFIG`/`RESTVERIFY_STATE`.
+- Metadata drift (file mode/ownership) is now declared, not asserted: it
+  reports as an Info warning and never fails a run; `--strict` promotes it.
+- The restore-drill ships as a reusable GitHub Action
+  (`.github/actions/restore-drill/`) plus a standalone script and scheduled
+  workflow template (`templates/ci-drill/`): point it at your restic repo and
+  a degraded backup turns the nightly job red before you need it for real.
+  The action installs the released wheel only after verifying its signature.
+- Source distributions now ship the CI surface (`.github/`, `templates/`)
+  via the sdist allowlist.
+
+### Still open (honest)
+- `init --json` is deferred.
+- C1 (PyYAML ruling) remains open.
+- `run --sandbox` (R45, increment I11) rides the 0.2.1 train — it does not
+  gate this release.
+- The hosted nightly-drill leg awaits repository hosting (see standing
+  statuses); everything it will run is in this release and rehearsed.
+- Verify with a repo you can afford to rehearse on.
 
 ## [0.1.0] — first release — 2026-09-28
 
