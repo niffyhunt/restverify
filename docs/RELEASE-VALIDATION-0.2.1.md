@@ -103,4 +103,23 @@ Linux-leg evidence):
 818e19e4d1dc519574bcf8d5b4ff4158b7d21f098962f3a7428da935517b21ed  restverify-0.2.1.tar.gz
 ```
 
-Publishing is deliberately deferred — the operator provides the token.
+## PUBLISHED — 2026-09-29
+
+Released to PyPI with an operator-provided token (used once via twine from
+this host, then shredded from disk; the operator revoked it after the
+release). Post-publish verification against the live JSON API:
+
+```
+restverify-0.2.1-py3-none-any.whl: 28369b6f40ac226687b3241bef620879a98326b7e43a45ab489ddbea7e78bfe2  == MATCH
+restverify-0.2.1.tar.gz:           818e19e4d1dc519574bcf8d5b4ff4158b7d21f098962f3a7428da935517b21ed  == MATCH
+version: 0.2.1 | requires_python: >=3.11 | deps: none at runtime (extras only)
+```
+
+- 0.2.0 remains deliberately unpublished (the train's version arithmetic
+  supersedes it; the tag still exists for provenance).
+- End-to-end from PyPI: fresh venv, `pip install restverify==0.2.1` →
+  `restverify 0.2.1` → dry-run `✓ PASS (dry run)`. (One transient CDN lag:
+  the first install attempt 404'd ~15 s after upload; a retry succeeded.)
+- Release page: https://pypi.org/project/restverify/0.2.1/
+- The detached `.asc` signatures and this repo's `docs/release-key.asc`
+  remain the artefact-authentication path (PyPI does not host signatures).
