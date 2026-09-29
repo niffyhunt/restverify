@@ -1,6 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+
+## [0.2.1] — the sandboxed-restore release — 2026-09-29
+
+I11 (R45) rides this train exactly as the approved plan stated — the 0.2.0
+tag was cut before the sandbox increment was built, and the changelog said
+so rather than hiding it.
+
 ### Added — I11: `run --sandbox` (R45) — the restore runs in a disposable container
 - **`restverify run -r <repo> --sandbox`**: the restore executes inside an
   ephemeral container so the host never touches restored data directly. The
@@ -24,6 +31,21 @@
   sudo); a `password_command` that reads a host file needs
   `RESTVERIFY_SANDBOX_PASSFILE` (mounted read-only) because the command runs
   in-container; Windows is out of scope — the drill runs natively there.
+
+### Standing statuses (as of this release)
+- **V2 train complete** — I8 (signed release) ✓, I9 (scale drill, B1 closed) ✓,
+  I10 (CI action, R44) ✓, I11 (sandbox, R45) ✓. Phase 2's increment train is
+  fully built; ids R43–R46 shipped, R47+ free.
+- **C1 unchanged** — TOML config via `tomllib`; `dependencies = []` asserted.
+- **`init --json` deferred** (the last open rider).
+- **R44 hosted nightly leg** still pending operator hosting.
+
+### What changed for users
+- One new optional flag, `run --sandbox`; nothing else about `run` moved.
+- Exit codes 0/1/2/64, the `schema: 1` envelope, the demo line, config and
+  history formats: all unchanged from 0.1.0 — a 0.1.0 install upgrades in
+  place, keeps its config and history, and behaves identically (proven by
+  the upgrade drill in `docs/RELEASE-VALIDATION-0.2.1.md`).
 
 ## [0.2.0] — the signed-drill release — 2026-09-29
 

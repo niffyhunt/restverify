@@ -2,11 +2,12 @@
 
 Rehearse and verify restic restores locally, on a schedule, with a diff-proof report.
 
-> **Status: v0.2.0 — signed releases + CI drill.** `run`, `report` and `cron` are
-> implemented and verified against real repos; the release train is signed
+> **Status: v0.2.1 — signed releases, CI drill, sandboxed restores.** `run`, `report` and
+> `cron` are implemented and verified against real repos; the release train is signed
 > (tag + artefacts); a 1.02 GiB / 1253-file drill over an SFTP backend, run as a
-> non-root user, passed with 0 diffs (docs/I9-DRILL.md); and the drill ships as a
-> GitHub Action (docs/I10-CI.md). `init --json` is still deferred. Verify with a
+> non-root user, passed with 0 diffs (docs/I9-DRILL.md); the drill ships as a
+> GitHub Action (docs/I10-CI.md); and `run --sandbox` restores inside a purged
+> container (docs/I11-SANDBOX.md). `init --json` is still deferred. Verify with a
 > repo you can afford to rehearse on.
 
 ## Why
@@ -23,7 +24,7 @@ It does **not** orchestrate backups.
 ## Install
 
 ```bash
-pipx install restverify
+python3 -m pip install restverify     # or: pipx install restverify
 ```
 
 Requires Python 3.11+ and a `restic` binary on PATH.

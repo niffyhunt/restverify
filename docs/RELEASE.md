@@ -64,12 +64,12 @@ artefact only after the suite passed on the platform it was built on.
 ## 4. Install
 
 ```bash
-pipx install ./dist/restverify-<version>-py3-none-any.whl
-pipx list
+python3 -m pip install ./dist/restverify-<version>-py3-none-any.whl
 ```
 
-`pipx` is the supported install path (B2 ruling). One venv per app, no
-site-packages pollution, and the console script lands on PATH.
+`pip` is the primary install path (R20: "pipx/pip"); `pipx install` is the
+equivalent for one-venv-per-app setups. Either way the console script lands
+on PATH and no runtime dependency exists.
 
 ## 5. Smoke test
 
