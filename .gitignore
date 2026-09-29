@@ -7,3 +7,7 @@ build/
 *.egg-info/
 .pytest_cache/
 .coverage
+
+# test-run transcripts (never tracked, never shipped — see I8)
+rv_testrun.txt
+testsuite_*.txt

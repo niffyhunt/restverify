@@ -20,6 +20,21 @@ dev = ["pytest==8.3.4", "build==1.6.1"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/restverify"]
 
+# Sdist is an explicit allowlist, NOT `include everything` — the 0.1.0 sdist
+# accidentally shipped five untracked test transcripts (rv_testrun.txt,
+# testsuite_*.txt; found in docs/VERIFICATION-0.1.0.md). With `paths`, a
+# forgotten file simply does not ship. (I8, R28.)
+[tool.hatch.build.targets.sdist]
+include = [
+  "pyproject.toml",
+  "README.md",
+  "CHANGELOG.md",
+  "docs/",
+  "scripts/",
+  "src/",
+  "tests/",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

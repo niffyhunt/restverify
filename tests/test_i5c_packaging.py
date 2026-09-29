@@ -51,3 +51,57 @@ def test_release_doc_names_every_checklist_step():
         assert step in text, f"docs/RELEASE.md is missing the '{step}' step"
     assert "pipx install" in text
     assert "git tag -s" in text
+
+
+# ── I8: signed release train ────────────────────────────────────────────────
+
+def test_sdist_is_an_explicit_allowlist():
+    """The 0.1.0 sdist shipped five untracked test transcripts
+    (rv_testrun.txt, testsuite_*.txt) because the sdist target included
+    everything. I8 replaces that with an allowlist, so a forgotten file
+    simply does not ship (docs/VERIFICATION-0.1.0.md, finding 2)."""
+    sdist = _project()["tool"]["hatch"]["build"]["targets"]["sdist"]
+    include = sdist["include"]
+    assert isinstance(include, list) and len(include) >= 7
+    for expected in ("pyproject.toml", "README.md", "CHANGELOG.md", "docs/",
+                     "src/", "tests/"):
+        assert expected in include, include
+    # the transcripts the verification found must never be listed
+    for stray in ("rv_testrun.txt", "testsuite_final.txt", "testsuite_full.txt",
+                  "testsuite_run2.txt", "testsuite_run3.txt"):
+        assert stray not in include
+
+
+def test_release_doc_names_the_signing_surface():
+    """I8: the checklist must execute the signing, not aspire to it — key
+    material, tag verification, artefact signatures, publisher auth, and
+    per-artefact provenance."""
+    text = RELEASE_DOC.read_text(encoding="utf-8")
+    assert "Key material" in text, "the key-material step is missing"
+    assert "git tag -v" in text, "the tag must be verified, not just signed"
+    assert "gpg --detach-sign" in text and "gpg --verify" in text, \
+        "artefact signing + round-trip verification are R28's core"
+    assert "trusted publishing" in text.lower(), \
+        "publisher authentication (OIDC) is part of the R28 posture"
+    assert "C5F735E977D4D45C1663AA40E4CE56B6CEF87373" in text, \
+        "the release key fingerprint must be pinned in the doc"
+    assert "build host and platform" in text, \
+        "per-artefact provenance (Windows-leg evidence) is recorded"
+    assert "testsuite_" in text, \
+        "the sdist-transcript exclusion must stay visible to the operator"
+
+
+def test_release_key_ships_in_repo():
+    """A downloader must be able to verify artefacts without a keyserver:
+    the armored public key is committed."""
+    key = ROOT / "docs" / "release-key.asc"
+    text = key.read_text(encoding="utf-8")
+    assert text.lstrip().startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----")
+    assert "-----END PGP PUBLIC KEY BLOCK-----" in text
+    assert len(text) > 500, "an armored RSA-3072 public key is never this small"
+
+
+def test_changelog_records_the_i8_train():
+    """The signing remediation is itself a change worth a changelog line."""
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "I8" in changelog and "signed" in changelog.lower()

@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+### Added — I8: signed release train (R28 closes from PARTIAL)
+- Dedicated sign-only release key (RSA3072, fingerprint `C5F735E9…7373`,
+  pinned in `docs/RELEASE.md`); the armored public key ships at
+  `docs/release-key.asc` so artefacts are verifiable without a keyserver.
+- Signed tag `v0.1.0` cut retroactively at the published tree (`49b111b`) —
+  the 0.1.0 artefacts predate the key; the remediation is documented in the
+  tag message. Future tags are signed at release time.
+- `docs/RELEASE.md` now executes the signing: key-material step, `git tag -v`
+  verification with pasted output, detached artefact signatures with
+  round-trip proof, PyPI trusted-publishing posture, and per-artefact
+  build-host/platform provenance (the Windows-leg evidence rule).
+- The sdist is an explicit allowlist: the five stray test transcripts found
+  in the published 0.1.0 sdist (`docs/VERIFICATION-0.1.0.md`) can never ship
+  again — asserted by regression test.
+
 ## [0.1.0] — first release — 2026-09-28
 
 ### Shipped (I1→I7)
