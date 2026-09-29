@@ -18,6 +18,16 @@ Warning class (confirmed ruling Q1): divergence with no data difference - an
 empty directory present on only one side. Warnings are printed and do not fail
 the run unless ``--strict`` promotes them. Any difference in data fails with
 exit 2 unconditionally.
+
+Metadata drift (R46, I9): permission bits and owner uid are recorded per
+entry (manifest) and compared like-for-like. Divergence is **declared, not
+asserted**: it is an Info-severity warning (``severity: "info"`` in the same
+``warnings`` array - no new envelope keys) that never fails a run on its own;
+``--strict`` promotes it exactly like the empty-directory class. A metadata
+difference already explained by a data diff (a file missing or resized) is
+not double-reported, mirroring the structure-warning rule. Restores across
+users commonly churn ownership, so the default stays quiet by design: the
+exit-code contract must not decay into noise.
 """
 from __future__ import annotations
 
@@ -168,6 +178,38 @@ def _structure_warnings(restored_man, source_man) -> list[Diff]:
     return warnings
 
 
+def _metadata_warnings(restored_man, source_man, already_flagged) -> list[Diff]:
+    """R46: mode/uid divergence as Info — declared, never asserted.
+
+    Compared like-for-like (both sides captured the same way), so a platform
+    without uids reports nothing instead of lying. Paths already flagged as
+    data diffs are skipped: metadata churn there is explained, not extra
+    signal.
+    """
+    restored = {e.path: e for e in restored_man.entries}
+    source = {e.path: e for e in source_man.entries}
+    warnings: list[Diff] = []
+    for path in sorted(set(restored) & set(source)):
+        if path in already_flagged:
+            continue
+        mine, theirs = restored[path], source[path]
+        if mine.mode is not None and theirs.mode is not None \
+                and mine.mode != theirs.mode:
+            warnings.append(Diff(
+                path, "metadata",
+                f"mode differs: restored {oct(mine.mode)}, "
+                f"source {oct(theirs.mode)} (informational; --strict promotes)",
+                severity="info"))
+        elif mine.uid is not None and theirs.uid is not None \
+                and mine.uid != theirs.uid:
+            warnings.append(Diff(
+                path, "metadata",
+                f"owner differs: restored uid {mine.uid}, "
+                f"source uid {theirs.uid} (informational; --strict promotes)",
+                severity="info"))
+    return warnings
+
+
 def compare(restored_man, restored_sample, source_root, patterns=(), strict=False) -> Comparison:
     """Compare a restored tree against its source, honouring the same excludes."""
     source_path = Path(str(source_root)).expanduser()
@@ -200,6 +242,7 @@ def compare(restored_man, restored_sample, source_root, patterns=(), strict=Fals
     flagged = {d.path for d in errors if d.path}
     errors += _sample_diffs(restored_sample, source_sample, flagged)
     warnings = _structure_warnings(restored_man, source_man)
+    warnings += _metadata_warnings(restored_man, source_man, flagged)
     # Defensive: a digest disagreement must never be a PASS, even if we could
     # not name the file. (Reached only in a pathological case.)
     if restored_sample.digest != source_sample.digest and not errors:

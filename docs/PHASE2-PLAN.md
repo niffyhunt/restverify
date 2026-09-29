@@ -45,6 +45,8 @@ Scaffolding + test infrastructure only may precede the GO gate below.
 | R27 | `restic` binary is a documented prerequisite | missing restic → teaching error (U2), never a traceback |
 | R28 | Pinned, signed releases | release process doc; pinned dev deps |
 | R29 | Human-readable byte totals (`cli.human_bytes()`, binary units, one decimal) | formatting asserted by a parametrised unit test; consumed by the run/demo line (R22) and the I4 `report` |
+| R43 | `RESTVERIFY_HOME` relocates the whole restverify layout for drill/CI users | beats XDG vars and `RESTVERIFY_CONFIG`/`RESTVERIFY_STATE` only in precedence order (STATE/CONFIG still win last); config under `<home>/.config/restverify`, state under `<home>/.local/state/restverify`; absence resolves exactly as before (pinned by test) |
+| R46 | Metadata drift (mode/uid) declared, not asserted | per-entry mode/uid captured best-effort; like-for-like comparison yields Info-severity warnings in the existing `warnings` array (no new envelope keys); never fails alone; `--strict` promotes; no double report where a data diff already explains the path |
 
 ### Negative requirements — PRODUCT 1 (PDF line 63)
 

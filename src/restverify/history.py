@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .config import HOME_ENV
 from .errors import HistoryError
 
 STATE_ENV = "RESTVERIFY_STATE"
@@ -71,16 +72,22 @@ _DDL = (
 def state_dir(base: Path | str | None = None) -> Path:
     """One place that derives the state directory (ruling 1).
 
-    Explicit base > RESTVERIFY_STATE > XDG_STATE_HOME/restverify >
-    ~/.local/state/restverify. Not the config dir, not the temp dir.
+    Explicit base > RESTVERIFY_STATE > RESTVERIFY_HOME/.local/state (R43,
+    which also beats XDG_STATE_HOME — see config.xdg_base) >
+    XDG_STATE_HOME/restverify > ~/.local/state/restverify. Not the config
+    dir, not the temp dir.
     """
     if base:
         return Path(base)
     override = os.environ.get(STATE_ENV)
     if override:
         return Path(override).expanduser()
-    xdg = os.environ.get("XDG_STATE_HOME")
-    root = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "state"
+    home = os.environ.get(HOME_ENV)
+    if home:
+        root = Path(home).expanduser() / ".local" / "state"
+    else:
+        xdg = os.environ.get("XDG_STATE_HOME")
+        root = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "state"
     return root / "restverify"
 
 

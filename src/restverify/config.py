@@ -18,7 +18,24 @@ from pathlib import Path
 from .errors import ConfigError
 
 CONFIG_ENV = "RESTVERIFY_CONFIG"
+HOME_ENV = "RESTVERIFY_HOME"      # R43: artificial home for drill/CI users
 DEFAULT_SNAPSHOT = "latest"
+
+
+def xdg_base(env_var: str, subdir: str) -> Path:
+    """One XDG base-dir resolution with the R43 override (ruling: here)."
+
+    Precedence: RESTVERIFY_HOME > the named XDG variable > the real home.
+    RESTVERIFY_HOME deliberately beats XDG_*: a drill user (or CI) may inherit
+    XDG_CONFIG_HOME/XDG_STATE_HOME from the invoking environment, and writing
+    there would be the exact leak R43 exists to prevent. When set, the whole
+    XDG layout is mirrored under the artificial home, so the drill user's
+    footprint is one subtree that can be rm -rf'd after the drill.
+    """
+    home = os.environ.get(HOME_ENV)
+    if home:
+        return Path(home).expanduser() / subdir
+    return Path(os.environ.get(env_var) or (Path.home() / subdir))
 
 
 def default_config_path() -> Path:
@@ -26,8 +43,8 @@ def default_config_path() -> Path:
     override = os.environ.get(CONFIG_ENV)
     if override:
         return Path(override).expanduser()
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "restverify" / "config.toml"
+    base = xdg_base("XDG_CONFIG_HOME", ".config")
+    return base / "restverify" / "config.toml"
 
 
 @dataclass

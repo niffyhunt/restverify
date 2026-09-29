@@ -6,6 +6,14 @@ observed. Building the manifest is intentionally cheap — it uses metadata
 (``scandir``/``stat``) only and **never reads file contents**. Content hashing
 is the sampled digest's job (I2b), which keeps the expensive I/O in one place.
 
+Since I9 (R46) each entry also records its permission bits and owner uid,
+best-effort (an unreadable stat yields ``None``, never a failure). These feed
+the Info-level ``metadata`` drift class in the comparison — they are declared,
+not asserted: they never fail a run, and ``--strict`` is what promotes them.
+On a platform without uids both sides of the comparison record the same value,
+so the like-for-like rule produces no noise there (no platform branching; the
+N7 negative holds).
+
 Symlink policy: **recorded, never followed.** A link is evidence of what the
 repository held; following one could read data outside the restore target
 (which would defeat the read-only and excludes guarantees) or loop forever.
@@ -33,6 +41,23 @@ KIND_OTHER = "other"           # fifo/socket/device: recorded so nothing is hidd
 SYMLINK_POLICY = "recorded-not-followed"
 
 
+def _mode_of(entry, st=None):
+    """R46: permission bits (st_mode & 0o7777), best-effort — never raises."""
+    try:
+        return (st or entry.stat(follow_symlinks=False)).st_mode & 0o7777
+    except OSError:
+        return None
+
+
+def _uid_of(entry, st=None):
+    """R46: owner uid, best-effort — never raises (0 where the platform has no
+    uid; like-for-like comparison makes that self-consistent)."""
+    try:
+        return (st or entry.stat(follow_symlinks=False)).st_uid
+    except OSError:
+        return None
+
+
 @dataclass
 class Entry:
     """One non-directory entry in the restored tree."""
@@ -41,11 +66,17 @@ class Entry:
     kind: str
     size: int                  # regular-file bytes; 0 for links and other
     link_target: str | None = None
+    mode: int | None = None    # R46: st_mode & 0o7777; None keeps old manifests honest
+    uid: int | None = None     # R46: owner uid (best-effort; same rules as mode)
 
     def to_json(self) -> dict:
         data = {"path": self.path, "kind": self.kind, "size": self.size}
         if self.kind == KIND_SYMLINK:
             data["link_target"] = self.link_target
+        if self.mode is not None:
+            data["mode"] = oct(self.mode)
+        if self.uid is not None:
+            data["uid"] = self.uid
         return data
 
 
@@ -198,7 +229,8 @@ def build(root: Path | str, ignore_top_level: Iterable[str] = (),
                         hint="re-run; if it persists the restore did not complete",
                     ) from exc
                 result.entries.append(
-                    Entry(path=rel, kind=KIND_SYMLINK, size=0, link_target=target))
+                    Entry(path=rel, kind=KIND_SYMLINK, size=0, link_target=target,
+                          mode=_mode_of(child), uid=_uid_of(child)))
                 continue
             if child.is_dir(follow_symlinks=False):
                 result.directories.setdefault(rel, DirStat())
@@ -207,13 +239,16 @@ def build(root: Path | str, ignore_top_level: Iterable[str] = (),
                 continue
             if child.is_file(follow_symlinks=False):
                 try:
-                    size = child.stat(follow_symlinks=False).st_size
+                    st = child.stat(follow_symlinks=False)
+                    size = st.st_size
                 except OSError as exc:
                     raise ManifestError(
                         f"could not stat {child.path}: {exc.strerror or exc}",
                         hint="re-run; if it persists the restore did not complete",
                     ) from exc
-                result.entries.append(Entry(path=rel, kind=KIND_FILE, size=size))
+                result.entries.append(Entry(path=rel, kind=KIND_FILE, size=size,
+                                            mode=_mode_of(child, st),
+                                            uid=_uid_of(child, st)))
                 stat = result.directories[rel_dir]
                 stat.files += 1
                 stat.bytes += size
