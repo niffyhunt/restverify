@@ -46,6 +46,13 @@ NETWORK_MODULES = ["socket", "ssl", "urllib", "urllib2", "urllib3", "http", "req
                    "aiohttp", "httpx", "ftplib", "smtplib", "telnetlib", "xmlrpc", "asyncio"]
 REVIEW_ONLY = {"asyncio": "not a network module, but suspicious in a single-threaded CLI"}
 
+# Amended in I12 (R47, operator-approved spec): webhook.py is the ONE module
+# allowed outbound network (urllib.request) — it POSTs the verification
+# envelope to an operator-provided https:// URL. Its imports are EXPECTED and
+# do not fail the network row; anything else it ever imports from that list,
+# or any other module importing one of these roots, still fails the sweep.
+EXPECTED_NETWORK = {"webhook.py": {"urllib.request", "urllib.error", "urllib.parse"}}
+
 TELEMETRY_WORDS = ["analytics", "telemetry", "sentry", "datadog", "newrelic", "honeycomb",
                    "lightstep", "opentelemetry", "prometheus", "statsd", "mixpanel",
                    "amplitude", "segment", "posthog", "matomo", "plausible"]
@@ -286,7 +293,8 @@ def build_report(root):
                if n.split(".")[0] in NETWORK_MODULES and n.split(".")[0] not in REVIEW_ONLY]
     network_named = [f"{m}: {n}"
                      for n in network
-                     for m in sorted(mod for mod, names in per_module.items() if n in names)]
+                     for m in sorted(mod for mod, names in per_module.items() if n in names)
+                     if n not in EXPECTED_NETWORK.get(m, set())]
     third_party_named = [f"{m}: {n}"
                          for n in third_party
                          for m in sorted(mod for mod, names in per_module.items() if n in names)]

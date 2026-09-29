@@ -121,6 +121,25 @@ human `what` and a `hint`.
 The exit codes and the envelope are the entire integration surface: there is
 nothing to scrape and nothing that changes under you between patch releases.
 
+### Deliver the verdict: `--report-webhook`
+
+```bash
+restverify run -r /srv/backup --json \
+  --report-webhook https://collector.example/hooks/restverify
+```
+
+After the run — pass, mismatch, or error — the exact JSON envelope is POSTed
+to the URL (`Content-Type: application/json`, user agent
+`restverify/<version>`), so a collector or pager sees the same object the
+operator would have seen on stdout.
+
+Delivery is best-effort by contract: a failure is one line on stderr and
+**never changes the exit code** — the verdict is the verification's, not the
+webhook's. Validation happens before anything runs (`https://` only, timeout
+`0 < t <= 60` seconds, default 10; anything else is exit 64 and no network
+attempt). Redirects are refused, credentials in the URL are never transmitted
+or logged, and there are no retries — one attempt, one line of truth.
+
 ## On a schedule
 
 ```bash

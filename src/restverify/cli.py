@@ -26,6 +26,7 @@ from . import restic as resticmod
 from . import sandbox as sandboxmod
 from . import sampling as samplingmod
 from . import tempstore
+from . import webhook as webhookmod
 from .errors import (CODE_BY_KIND, ConfigError, HistoryError, RestverifyError,
                      exit_code_for, kind_of)
 
@@ -225,6 +226,17 @@ def build_parser() -> argparse.ArgumentParser:
                             "differences always fail regardless")
     p_run.add_argument("--snapshot", metavar="SELECTOR", default=None,
                        help="snapshot to verify: 'latest' (default) or a short id")
+    p_run.add_argument("--report-webhook", metavar="URL", default=None,
+                       type=webhookmod.url_arg,
+                       help="POST the exact --json envelope to this https:// URL after "
+                            "the run (pass, mismatch or error; not --dry-run). "
+                            "Best-effort: delivery failure is one stderr line and "
+                            "never changes the exit code. https only, no retries, "
+                            "redirects refused")
+    p_run.add_argument("--webhook-timeout", metavar="SECONDS", default=None,
+                       type=webhookmod.timeout_arg,
+                       help="webhook delivery timeout in seconds, 0 < t <= 60 "
+                            "(default: 10); validated before anything runs")
     p_run.add_argument("--sandbox", action="store_true",
                        help="restore inside a disposable container (R45): the "
                             "host restic binary runs there, the temp restore "
@@ -588,6 +600,50 @@ def _write_history(record: "historymod.RunRecord") -> dict:
     return {"recorded": True, "path": str(path), "pruned": pruned}
 
 
+# ── webhook delivery (I12/R47) ──────────────────────────────────────────
+
+def _webhook_config(args, entry) -> tuple[str | None, float]:
+    """Resolve (url, timeout): the flag wins, then the saved config; default 10s.
+
+    Called only after argparse has validated both via type= (parse_url /
+    parse_timeout), so a ConfigError raised here is about a saved value, not a
+    malformed command line.
+    """
+    url = getattr(args, "report_webhook", None)
+    if url is None and entry is not None:
+        url = getattr(entry, "report_webhook", None)
+    if url is not None:
+        try:
+            url = webhookmod.parse_url(url)   # a saved value is re-checked here
+        except ValueError:
+            url = None
+    timeout = getattr(args, "webhook_timeout", None)
+    if timeout is None:
+        timeout = 10.0
+    return (url, float(timeout))
+
+
+def _deliver_webhook(args, entry, payload: dict) -> None:
+    """Deliver the finished envelope, best-effort (I12).
+
+    Ordering rule: this runs AFTER the history write and AFTER the envelope is
+    fully built, BEFORE the process exits — the receiver sees exactly the same
+    JSON the operator would have seen on stdout. A delivery failure is one
+    stderr line; it NEVER changes the exit code and NEVER reaches stdout.
+    Errors here are swallowed by deliver()'s contract; the extra except is a
+    belt-and-braces guard so a bug can never turn into a traceback after a
+    successful verification.
+    """
+    url, timeout = _webhook_config(args, entry)
+    if not url:
+        return
+    ok, line = webhookmod.deliver(url, webhookmod.envelope_bytes(payload), timeout)
+    print(f"{PROG}: webhook {line}", file=sys.stderr)
+    if not ok:
+        print("  note: delivery failure does not change the exit code — the "
+              "verification verdict above stands", file=sys.stderr)
+
+
 def _cmd_run(args) -> int:
     config = cfgmod.load_config(args.config)
     entry = _resolve_entry(args, config)
@@ -664,11 +720,16 @@ def _cmd_run(args) -> int:
         schema=SCHEMA_VERSION,
     ))
 
+    # I12: one envelope, two consumers — stdout prints it, the webhook (if
+    # configured) receives the very same bytes. History write has happened;
+    # delivery is the last thing before the verdict leaves the process.
+    payload = _run_payload(entry, snapshot, man, sample, comparison,
+                           history_block, restore_root, elapsed, cleaned,
+                           sandbox_run=sandbox_run)
     if args.json:
-        print(json.dumps(_run_payload(entry, snapshot, man, sample, comparison,
-                                      history_block, restore_root, elapsed, cleaned,
-                                      sandbox_run=sandbox_run),
-                         indent=2, ensure_ascii=False))
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    _deliver_webhook(args, entry, payload)
+    if args.json:
         return exit_code
 
     size = human_bytes(man.total_bytes)
@@ -1059,16 +1120,27 @@ def main(argv=None) -> int:
             print(f"  restic said: {tail}", file=sys.stderr)
         code = exit_code_for(exc)
         _record_error_run(args, kind_of(exc), code, started)
+        payload = _error_payload(kind_of(exc), exc.what, code, command=args.command,
+                                 hint=exc.hint, stderr_tail=tail or None)
         _emit_error(kind_of(exc), exc.what, code, command=args.command,
                     hint=exc.hint, stderr_tail=tail or None)
+        if args.command == "run":
+            # I12: an error outcome is still a verification outcome — the
+            # receiver learns about the failure like any other verdict.
+            _deliver_webhook(args, None, payload)
         return code
     except KeyboardInterrupt:
         print(f"\n{PROG}: interrupted.", file=sys.stderr)
         code = CODE_BY_KIND["interrupted"]
         _record_error_run(args, "interrupted", code, started)
+        payload = _error_payload("interrupted", "interrupted before the run finished.",
+                                 code, command=args.command,
+                                 hint="re-run when ready; nothing was left behind")
         _emit_error("interrupted", "interrupted before the run finished.",
                     code, command=args.command,
                     hint="re-run when ready; nothing was left behind")
+        if args.command == "run":
+            _deliver_webhook(args, None, payload)
         return code
 
 

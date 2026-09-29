@@ -59,10 +59,17 @@ def test_no_borg_or_tar_code_paths():
 # ── R25/V2: no network in shipped paths ───────────────────────────────────
 
 def test_no_network_imports_in_shipped_paths():
-    body = _all_source()
-    for token in ("import socket", "import requests", "urllib.request",
-                  "urllib.error", "http.client", "ftplib", "smtplib", "telnetlib"):
-        assert token not in body, f"network import found: {token}"
+    """Amended in I12 (R47, operator-approved spec): webhook.py is the ONE module
+    allowed outbound network (urllib.request) — it POSTs the verification envelope
+    to an operator-provided https:// URL. Everything else stays network-free; a
+    token appearing in any OTHER module is still a failure."""
+    for path in SHIPPED:
+        if path.name == "webhook.py":
+            continue
+        body = path.read_text(encoding="utf-8")
+        for token in ("import socket", "import requests", "urllib.request",
+                      "urllib.error", "http.client", "ftplib", "smtplib", "telnetlib"):
+            assert token not in body, f"network import found in {path.name}: {token}"
 
 
 # ── R23/R26: never writes to the user's source ────────────────────────────

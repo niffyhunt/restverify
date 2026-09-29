@@ -20,8 +20,12 @@ SRC = REPO / "src" / "restverify"
 SCRIPT = REPO / "scripts" / "security_sweep.py"
 SHIPPED = sorted(SRC.rglob("*.py"))
 
+# Amended in I12 (R47, operator-approved spec): webhook.py is the ONE module
+# allowed outbound network (urllib.request) — the network-modules row of the
+# sweep now reports webhook.py's imports as EXPECTED rather than forbidden.
 NETWORK_MODULES = ["socket", "ssl", "urllib", "urllib2", "urllib3", "http", "requests",
                    "aiohttp", "httpx", "ftplib", "smtplib", "telnetlib", "xmlrpc"]
+EXPECTED_NETWORK = {"webhook.py": {"urllib.request", "urllib.error", "urllib.parse"}}
 TELEMETRY_WORDS = ["analytics", "telemetry", "sentry", "datadog", "newrelic", "honeycomb",
                    "lightstep", "opentelemetry", "prometheus", "statsd", "mixpanel",
                    "amplitude", "segment", "posthog", "matomo", "plausible"]
@@ -96,9 +100,12 @@ def test_no_network_module_is_imported():
     hits = {}
     for module, names in _imports().items():
         found = sorted(n for n in names if n.split(".")[0] in NETWORK_MODULES)
-        if found:
-            hits[module] = found
-    assert hits == {}, f"network module imported: {hits}"
+        expected = EXPECTED_NETWORK.get(module, set())
+        extra = sorted(set(found) - expected)
+        missing = sorted(expected - set(found))
+        if extra or missing:
+            hits[module] = {"unexpected": extra, "missing": missing}
+    assert hits == {}, f"network module imported outside the I12 boundary: {hits}"
 
 
 def test_no_telemetry_symbol_or_vendor_url():
