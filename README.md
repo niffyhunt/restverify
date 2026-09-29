@@ -51,6 +51,21 @@ cadence and leaves the schedule to you. A scheduler runs with a minimal
 environment, so set `RESTIC_PASSWORD_COMMAND` (or `RESTIC_PASSWORD_FILE`) there —
 restverify never stores your password.
 
+## Sandboxed verification (optional isolation)
+
+```bash
+restverify run -r /srv/backup --sandbox
+```
+
+The restore runs inside a disposable container (your restic binary, your
+temp dir, your uid — no image builds, nothing persists) and is purged on
+every exit, including a `kill -9` mid-restore: the next run sweeps any
+leftover container automatically. Local repos mount read-only with no
+network; the verification, history and exit codes are identical to a native
+run. Requires docker (or a compatible runtime) on PATH with socket access
+for your user — never sudo. See `docs/I11-SANDBOX.md` for the measured
+gate.
+
 ## CI: the nightly restore-drill
 
 A scheduled GitHub Action that drills your backup ships in this repository

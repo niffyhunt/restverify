@@ -1,6 +1,29 @@
 # Changelog
 
 ## [Unreleased]
+### Added — I11: `run --sandbox` (R45) — the restore runs in a disposable container
+- **`restverify run -r <repo> --sandbox`**: the restore executes inside an
+  ephemeral container so the host never touches restored data directly. The
+  host restic binary is copied into a throwaway `ubuntu:24.04` container
+  (image/runtime overridable), the temp restore dir is bind-mounted, and the
+  exec runs as the invoking user — restored files are owned by you, never
+  root. Local repos mount read-only with no network; remote repos (sftp://,
+  rclone:) resolve inside the container with your own credentials.
+- **Purge on every exit**, including `kill -9`: containers carry an ownership
+  label (`restverify.owner=<pid>`); every sandboxed run sweeps leftovers whose
+  owner is gone first. Gate-drilled against real restic 0.16.4 + Docker
+  29.1.3: sandboxed restore exit 0 (91 files / 540 MiB, 0 diffs, `schema: 1`
+  with an additive `sandbox` block), SIGKILL mid-restore left an orphan, the
+  next run removed it and finished clean — zero orphans
+  (`docs/I11-SANDBOX.md`).
+- **No new exit code**: container-runtime failures are teaching errors (exit
+  1). The Single Spawner rule holds — restic.py stays the only process-
+  spawning module (`test_n5_only_restic_py_spawns_processes` green,
+  unmodified).
+- Honest limits: one documented runtime (docker; group socket access, never
+  sudo); a `password_command` that reads a host file needs
+  `RESTVERIFY_SANDBOX_PASSFILE` (mounted read-only) because the command runs
+  in-container; Windows is out of scope — the drill runs natively there.
 
 ## [0.2.0] — the signed-drill release — 2026-09-29
 

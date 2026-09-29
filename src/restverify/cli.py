@@ -23,6 +23,7 @@ from . import excludes as excludesmod
 from . import history as historymod
 from . import manifest as manifestmod
 from . import restic as resticmod
+from . import sandbox as sandboxmod
 from . import sampling as samplingmod
 from . import tempstore
 from .errors import (CODE_BY_KIND, ConfigError, HistoryError, RestverifyError,
@@ -224,6 +225,15 @@ def build_parser() -> argparse.ArgumentParser:
                             "differences always fail regardless")
     p_run.add_argument("--snapshot", metavar="SELECTOR", default=None,
                        help="snapshot to verify: 'latest' (default) or a short id")
+    p_run.add_argument("--sandbox", action="store_true",
+                       help="restore inside a disposable container (R45): the "
+                            "host restic binary runs there, the temp restore "
+                            "dir is bind-mounted, and the container is purged "
+                            "on every exit. Remote repos resolve inside the "
+                            "container; a password_command that reads a host "
+                            "file needs RESTVERIFY_SANDBOX_PASSFILE to mount "
+                            "it read-only. Requires a container runtime on "
+                            "PATH (docker; group access, never sudo)")
     _add_common(p_run)
 
     p_report = sub.add_parser(
@@ -482,11 +492,15 @@ def _restored_root(target, snapshot):
 
 
 def _run_payload(entry, snapshot, man, sample, comparison, history_block, root,
-                 elapsed, cleaned) -> dict:
+                 elapsed, cleaned, sandbox_run=None) -> dict:
     """The run envelope. Every field is real, "schema" pins the shape, and the
-    additive "history" block states whether this run reached the store."""
+    additive "history" block states whether this run reached the store.
+
+    The "sandbox" block (I11) is additive and present only when --sandbox was
+    requested — its absence means a native restore, which keeps every existing
+    consumer of this envelope working unchanged (no-breakage contract)."""
     code = comparison.exit_code()
-    return {
+    payload = {
         "tool": PROG,
         "schema": SCHEMA_VERSION,
         "version": __version__,
@@ -512,6 +526,14 @@ def _run_payload(entry, snapshot, man, sample, comparison, history_block, root,
         "compare": comparison.to_json(),
         "strict": bool(entry.strict),
     }
+    if sandbox_run is not None:
+        payload["sandbox"] = {
+            "runtime": sandbox_run.runtime,
+            "image": sandbox_run.image,
+            "container": sandbox_run.container,
+            "purged": bool(sandbox_run.purged),
+        }
+    return payload
 
 
 def _dry_run_payload(entry, selector: str) -> dict:
@@ -596,9 +618,18 @@ def _cmd_run(args) -> int:
 
     started = time.time()
     snapshot = resticmod.newest_snapshot(entry.repo, password_command, selector)
+    sandbox_run = None
     with tempstore.restore_dir(entry.repo) as target:
-        resticmod.restore(entry.repo, snapshot, target,
-                          excludes=entry.excludes, password_command=password_command)
+        if getattr(args, "sandbox", False):
+            # R45: the restore itself runs inside a disposable container; the
+            # manifest/compare below are unchanged — they walk the same
+            # tempstore dir through the bind mount.
+            sandbox_run = sandboxmod.sandboxed_restore(
+                entry.repo, snapshot.id, Path(target),
+                password_command=password_command, excludes=entry.excludes)
+        else:
+            resticmod.restore(entry.repo, snapshot, target,
+                              excludes=entry.excludes, password_command=password_command)
         restore_root = _restored_root(target, snapshot)
         matcher = excludesmod.compile_matcher(entry.excludes, root=restore_root)
         man = manifestmod.build(restore_root, ignore_top_level=(tempstore.MARKER,),
@@ -635,7 +666,8 @@ def _cmd_run(args) -> int:
 
     if args.json:
         print(json.dumps(_run_payload(entry, snapshot, man, sample, comparison,
-                                      history_block, restore_root, elapsed, cleaned),
+                                      history_block, restore_root, elapsed, cleaned,
+                                      sandbox_run=sandbox_run),
                          indent=2, ensure_ascii=False))
         return exit_code
 
@@ -654,6 +686,10 @@ def _cmd_run(args) -> int:
           f"({manifestmod.SYMLINK_POLICY}), {len(man.ignored)} tempstore file(s) ignored")
     print(f"  sample   : {sample.digest} ({len(sample.files)} of "
           f"{sample.total_files} files; {sample.rule})")
+    if sandbox_run is not None:
+        print(f"  sandbox  : restored via {sandbox_run.runtime} container "
+              f"{sandbox_run.container} ({sandbox_run.image}); "
+              f"purged={'yes' if sandbox_run.purged else 'NO'}")
     if comparison.enabled:
         print(f"  compare  : {comparison.status} vs {comparison.source} "
               f"({len(comparison.errors)} error(s), {len(comparison.warnings)} "

@@ -10,6 +10,7 @@ log or persist a password, and we never set RESTIC_PASSWORD ourselves.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -49,6 +50,68 @@ def find_restic() -> str:
             hint=INSTALL_HINT + "; then re-run `restverify run -r <repo>`",
         )
     return found
+
+
+def find_binary(name: str) -> str | None:
+    """Locate an external binary on PATH (None if absent — caller teaches).
+
+    I11 seam: the sandbox needs the container-runtime CLI. Like find_restic,
+    it only LOOKS; every spawn stays in this module.
+    """
+    return shutil.which(name)
+
+
+def pid_alive(pid: int) -> bool:
+    """True when a process exists (signal 0 probe); EPERM means 'exists, owned
+    by someone else'. The sandbox orphan sweep uses this to decide whether a
+    leftover container's owner is gone — the tempstore sweep's same logic."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError as exc:
+        return exc.errno == errno.EPERM
+    return True
+
+
+def spawn_process(args: list[str], timeout: int | None = None,
+                  check: bool = True, extra_env: dict | None = None
+                  ) -> subprocess.CompletedProcess:
+    """The generic spawn seam (I11): run ONE external command, captured.
+
+    The Single Spawner rule says restic.py is the only module that spawns
+    processes; the sandbox's container-runtime calls route through here so
+    that rule keeps holding (`test_n5_only_restic_py_spawns_processes` reads
+    the source tree — sandbox.py itself contains no spawn call). This is
+    deliberately lower-level than run(): no verb assertion (a container CLI
+    is not restic), but the SAME failure translation — a non-zero exit
+    becomes a teaching ResticFailed, never a traceback.
+    """
+    env = build_env()
+    if extra_env:
+        env.update(extra_env)
+    limit = timeout or int(os.environ.get("RESTVERIFY_TIMEOUT", "1800"))
+    try:
+        proc = subprocess.run(args, env=env, capture_output=True, text=True,
+                              timeout=limit)
+    except subprocess.TimeoutExpired as exc:
+        raise ResticFailed(
+            f"{args[0]} did not finish within {limit}s and was stopped.",
+            hint="raise RESTVERIFY_TIMEOUT for slow operations, or retry without --sandbox",
+        ) from exc
+    except FileNotFoundError as exc:
+        raise ResticFailed(
+            f"{args[0]} disappeared from PATH mid-run.",
+            hint="check that the tool is installed and on PATH",
+        ) from exc
+    if check and proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-4:]
+        raise ResticFailed(
+            f"{args[0]} failed (exit {proc.returncode}).",
+            stderr_tail=" | ".join(tail),
+            hint=_hint_for(proc.stderr or ""),
+        )
+    return proc
 
 
 def _assert_verb_allowed(args: list[str]) -> None:
