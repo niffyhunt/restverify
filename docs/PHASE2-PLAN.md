@@ -113,6 +113,13 @@ operator ruled I7 onto the second host `vmi3416386` (the cowrie box), where
 as the single source of truth (the wheel was built and committed here, then
 installed on that host). Evidence: `restverify-I7-briefing.md` §1 and §6.
 
+**I9 drill (2026-09-29):** restic 0.16.4 installed on the primary box with
+authorisation for the scale drill; the SFTP backend was the local sshd and the
+drill ran as the dedicated non-root user `rvdrill` (uid 1001, own venv). The
+drill closed the B1 residual scope at scale — transcript:
+`docs/I9-DRILL.md`. The `restic` row above is therefore historical for I1–I7
+only; the drill re-ran the I7a rule with operator approval.
+
 ### Git state (2.0.2 requires a clean tree + recorded base commit)
 
 The two products are **standalone repos** (Gate F: one repo, one job). They are

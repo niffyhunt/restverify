@@ -1,6 +1,25 @@
 # Changelog
 
 ## [Unreleased]
+### Added — I9: restore-drill at scale (B1 residual closes) + R43/R46
+- **Scale drill (gate):** a ≥1 GB / ≥1000-file corpus (1253 files, 1.02 GiB
+  logical, unicode names, symlink, sparse file, empty dir) backed up to an
+  **SFTP backend** and verified by a **non-root user** (`rvdrill`, own venv,
+  I8's wheel): exit 0, 0 diffs, 12 s — transcript + reconciliation in
+  `docs/I9-DRILL.md`. No fake-vs-real corrections were needed; four
+  assumptions confirmed.
+- **R43 `RESTVERIFY_HOME`:** one variable relocates the whole layout for
+  drill/CI users (config + state under the artificial home), beats XDG vars
+  (an inherited XDG_STATE_HOME must not leak drill rows), loses to explicit
+  `RESTVERIFY_CONFIG`/`RESTVERIFY_STATE`; absence resolves exactly as before
+  (pinned by tests). Field-proven in the drill.
+- **R46 metadata drift declared, not asserted:** entries record mode/uid
+  best-effort; divergence is an Info warning in the existing `warnings`
+  array (no new envelope keys), never fails alone, `--strict` promotes it
+  (field-proven: exit 2 with the promoted-warning line). No double report
+  where a data diff already explains the path.
+- Drill-method rule: rebuild + reinstall the wheel from HEAD before every
+  drill (take 1 silently proved the stale 0.1.0 artefact).
 ### Added — I8: signed release train (R28 closes from PARTIAL)
 - Dedicated sign-only release key (RSA3072, fingerprint `C5F735E9…7373`,
   pinned in `docs/RELEASE.md`); the armored public key ships at

@@ -3,8 +3,10 @@
 Rehearse and verify restic restores locally, on a schedule, with a diff-proof report.
 
 > **Status: v0.1.0 — first release.** `run`, `report` and `cron` are implemented
-> and verified against real repos; `init --json` is still deferred. Verify with a
-> repo you can afford to rehearse on.
+> and verified against real repos; `init --json` is still deferred. Verified at
+> scale too: a 1.02 GiB / 1253-file drill over an SFTP backend, run as a
+> non-root user, passed with 0 diffs (docs/I9-DRILL.md). Verify with a repo
+> you can afford to rehearse on.
 
 ## Why
 
