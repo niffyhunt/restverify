@@ -136,7 +136,10 @@ def test_symlink_swapped_after_the_manifest_is_a_teaching_error(tmp_path):
 def test_hashing_is_confined_to_sampling():
     hits = sorted(p.name for p in SHIPPED
                   if "hashlib" in p.read_text(encoding="utf-8"))
-    assert hits == ["sampling.py"]
+    # Amended in I13 (R48): prove.py joins sampling.py — its SHA-256 use is
+    # the DRBG seed material (snapshot id + seed + percent), never file content.
+    # File-content hashing remains sampling.py's alone.
+    assert hits == ["prove.py", "sampling.py"]
 
 
 # ── public interface: help + --json + human line ──────────────────────────

@@ -11,11 +11,13 @@ log or persist a password, and we never set RESTIC_PASSWORD ourselves.
 from __future__ import annotations
 
 import errno
+import glob
 import json
 import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path, PurePath
 
 from .errors import NoSnapshots, ResticFailed, ResticMissing
 
@@ -241,3 +243,90 @@ def restore(repo: str, snapshot: Snapshot, target, excludes: list[str] | None = 
     for pattern in excludes or []:
         args += ["--exclude", pattern]
     run(args, password_command)
+
+
+def restore_paths(repo: str, snapshot_id: str, paths: list[str], target,
+                  excludes: list[str] | None = None,
+                  password_command: str | None = None) -> None:
+    """Selective restore for `prove` (I13): restore ONLY the listed paths.
+
+    Measured on restic 0.16.4 (throwaway repo, 2026-09-29): `restore --files-from`
+    does not exist in 0.16.4; `-i/--include pattern` (repeatable) does, and the
+    pattern is a GLOB. Filenames containing glob metacharacters or literal
+    backslashes must therefore be escaped, and the order is load-bearing: double
+    literal backslashes FIRST (glob sees them as an escaped backslash), then
+    glob.escape for the metacharacters. Both orders were probed against a real
+    repo: escape-then-double breaks on `back[1].txt`; double-then-escape restores
+    `weird[1].txt`, `back\\slash.txt` and plain paths alike.
+    """
+    args = ["restore", snapshot_id, "--target", str(target), "--repo", repo]
+    for path in paths:
+        args += ["--include", glob.escape(path.replace("\\", "\\\\"))]
+    for pattern in excludes or []:
+        args += ["--exclude", pattern]
+    run(args, password_command)
+
+
+def ls(repo: str, snapshot_id: str, password_command: str | None = None) -> list[dict]:
+    """`restic ls --json <id>` for `prove` (I13): the snapshot's file list.
+
+    Measured on restic 0.16.4: the output is NDJSON — line 1 is the snapshot
+    header ("struct_type": "snapshot"), then one object per tree node
+    ("struct_type": "node") with name/type/path/uid/gid/mode/permissions/
+    mtime/atime/ctime/inode. File nodes carry "size"; there is NO content
+    hash or blob id of any kind — verification against this listing is
+    therefore size-only (hashes_available=false), stated wherever `prove` is
+    documented. Raises ResticFailed (exit 1, kind restic_failed) when restic
+    fails or emits a line restverify cannot parse — reading the file list is
+    part of completing the run, not a data verdict.
+    """
+    proc = run(["ls", "--json", snapshot_id, "--repo", repo], password_command)
+    nodes: list[dict] = []
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError as exc:
+            raise ResticFailed(
+                "restic ls returned output restverify could not read as JSON.",
+                stderr_tail=line[:200],
+                hint="check that this restic build supports `ls --json`",
+            ) from exc
+        if item.get("struct_type") == "node":
+            nodes.append(item)
+    return nodes
+
+
+def restored_root(target, snapshot) -> "object":
+    """Locate the subtree the snapshot's own paths restored into (B1 assumption).
+
+    `restic restore <id> --target <dir>` recreates the snapshot's absolute
+    paths *under* the target, so verification needs that subtree, not the
+    target itself. The strip rule is restic's own, and it is not uniform:
+    POSIX paths keep their shape (`/srv/data` lands at `target/srv/data`),
+    while a Windows path lands under just its last component (`C:\\...\\src`
+    was measured to land at `target/src`, restic 0.19.1). Rather than fork
+    the logic per platform, each path is tried as progressively shorter
+    suffixes - longest first - and the first existing directory wins. Every
+    candidate stays inside the target, so repository metadata cannot aim our
+    walk at arbitrary filesystem paths.
+
+    Moved here from cli.py in I13 so `run` and `prove` share ONE implementation
+    of restic's restore layout instead of two copies that can rot apart.
+    """
+    base = Path(target).resolve()
+    for raw in snapshot.paths or []:
+        parts = [p for p in PurePath(str(raw)).parts
+                 if p not in ("/", "\\") and not p.endswith((":\\", ":/"))]
+        for start in range(len(parts)):
+            candidate = Path(target).joinpath(*parts[start:])
+            try:
+                resolved = candidate.resolve()
+                resolved.relative_to(base)
+            except (OSError, ValueError):
+                continue
+            if resolved.is_dir():
+                return resolved
+    return Path(target)

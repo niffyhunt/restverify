@@ -24,6 +24,7 @@ from . import history as historymod
 from . import manifest as manifestmod
 from . import restic as resticmod
 from . import sandbox as sandboxmod
+from . import prove as provemod
 from . import sampling as samplingmod
 from . import tempstore
 from . import webhook as webhookmod
@@ -38,7 +39,7 @@ DIFF_DISPLAY_LIMIT = 10
 # argparse, and _RAW_ARGV exists solely so a usage error can name its command.
 _JSON_MODE = False
 _RAW_ARGV: list[str] = []
-_KNOWN_COMMANDS = ("init", "run", "report", "cron")
+_KNOWN_COMMANDS = ("init", "run", "report", "cron", "prove")
 _PRUNE_ANNOUNCED: set[str] = set()   # one retention announcement per repo/process
 
 
@@ -95,6 +96,7 @@ DESCRIPTION = (
 EPILOG = f"""examples:
   restverify run -r /srv/backup            verify the newest snapshot (start here)
   restverify run -r /srv/backup --dry-run  show what would happen; restore nothing
+  restverify prove -r /srv/backup          restore a random sample and verify it
   restverify init -r /srv/backup           save a repo (with source/excludes) to config
   restverify report                        run history and trend
   restverify cron                          print a ready-to-paste crontab line
@@ -248,6 +250,63 @@ def build_parser() -> argparse.ArgumentParser:
                             "PATH (docker; group access, never sudo)")
     _add_common(p_run)
 
+    p_prove = sub.add_parser(
+        "prove", help="restore a random sample of files and verify them against "
+                      "the snapshot listing",
+        description="Prove a snapshot by restoring a random sample of its files and "
+                    "verifying each one against restic's own listing. Size-only by "
+                    "nature: `restic ls --json` exposes no content hashes (measured "
+                    "on restic 0.16.4), so hashes_available is false and the claim "
+                    "is existence + size.",
+        epilog="examples:\n"
+               "  restverify prove -r /srv/backup                 prove 10% of the newest snapshot\n"
+               "  restverify prove -r /srv/backup --sample 100    restore and check every file\n"
+               "  restverify prove -r /srv/backup --seed 7        a different deterministic sample\n"
+               "  restverify prove -r /srv/backup --dry-run       the plan without touching restic\n"
+               "\nsampling (this build):\n"
+               "  percent N (1-100, default 10) of the snapshot's files, files sorted by\n"
+               "  path; the sample is drawn by a counter-mode AES-256 keystream DRBG\n"
+               "  implemented on Python's standard library only. Default seed is\n"
+               "  derived from the snapshot id, so the same snapshot always yields the\n"
+               "  same sample; --seed changes it deterministically. The largest file\n"
+               "  (size, then path) is always included. Reproduce any run: same file\n"
+               "  list, same percent, same seed -> same sample.\n"
+               "\nverification (this build):\n"
+               "  only the sampled paths are restored (restic restore --include, one\n"
+               "  glob-escaped pattern per path). Each sampled file must exist and its\n"
+               "  size must equal the snapshot record; content is NOT hashed (restic\n"
+               "  ls exposes no hashes - this is honest scope, not a shortcut). Why\n"
+               "  size still bites: with one flipped byte in a real pack, `restic\n"
+               "  restore` exits 0 and writes a 0-byte file where the listing says\n"
+               "  12 bytes - prove catches that (measured, restic 0.16.4).\n"
+               "\nexit codes:\n"
+               "  0   every sampled file verified (also: the snapshot lists no files)\n"
+               "  1   the run could not complete (restic failed, no snapshots, bad ls)\n"
+               "  2   at least one sampled file is missing or its size differs\n"
+               "  64  usage problem (bad --sample/--seed, bad selector)\n"
+               "\njson envelope (--json):\n"
+               "  same top-level keys as run (schema 1, stdout purity, error kinds),\n"
+               "  with `prove` in place of `compare`: files_listed, files_sampled,\n"
+               "  files_verified, files_failed, hashes_available, percent, seed,\n"
+               "  failures (path/reason/expected_size/actual_size), restore and\n"
+               "  history blocks. History rows are written exactly like run's.\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_prove.add_argument("-r", "--repo", metavar="PATH",
+                         help="restic repository (or a repo name saved in the config)")
+    p_prove.add_argument("--sample", metavar="N", type=provemod.percent_arg,
+                         default=provemod.DEFAULT_PERCENT,
+                         help="percent of files to sample, integer 1-100 (default: 10)")
+    p_prove.add_argument("--seed", metavar="INT", type=int, default=None,
+                         help="seed for the deterministic sample (default: derived "
+                              "from the snapshot id, so runs are reproducible)")
+    p_prove.add_argument("--snapshot", metavar="SELECTOR", default=None,
+                         help="snapshot to prove: 'latest' (default) or a short id")
+    p_prove.add_argument("--dry-run", action="store_true",
+                         help="show the plan; restore nothing, record nothing")
+    p_prove.add_argument("-x", "--exclude", action="append", default=[], metavar="PATTERN",
+                         help="exclude pattern (repeatable) - honoured by the sample restore")
+    _add_common(p_prove)
+
     p_report = sub.add_parser(
         "report", help="show run history and trend",
         description="Read the local run history and show pass/fail trend.",
@@ -342,7 +401,7 @@ def _record_error_run(args, kind: str, code: int, started: float) -> None:
     of) resolving the entry; an unresolvable repo is recorded as "(unknown)"
     rather than guessing.
     """
-    if getattr(args, "command", None) != "run":
+    if getattr(args, "command", None) not in ("run", "prove"):
         return
     repo = getattr(args, "repo", "") or ""
     try:
@@ -443,13 +502,15 @@ def _resolve_entry(args, config):
             "no repository given and none is saved in the config.",
             hint="run `restverify run -r /path/to/repo` (or save it with `restverify init -r ...`)",
         )
-    if args.source:
+    # getattr, not attribute access: prove (I13) shares the repo resolution but
+    # has no --source/--no-source/--strict flags.
+    if getattr(args, "source", None):
         entry.source = args.source
-    if args.no_source:
+    if getattr(args, "no_source", False):
         entry.no_source = True
-    if args.strict:
+    if getattr(args, "strict", False):
         entry.strict = True
-    if args.snapshot:
+    if getattr(args, "snapshot", None):
         entry.snapshot = args.snapshot
     return entry
 
@@ -474,33 +535,9 @@ def human_bytes(count: int) -> str:
 
 
 def _restored_root(target, snapshot):
-    """Locate the subtree the snapshot's own paths restored into (B1 assumption).
-
-    `restic restore <id> --target <dir>` recreates the snapshot's absolute
-    paths *under* the target, so a source comparison needs that subtree, not
-    the target itself. The strip rule is restic's own, and it is not uniform:
-    POSIX paths keep their shape (`/srv/data` lands at `target/srv/data`),
-    while a Windows path lands under just its last component (`C:\\...\\src`
-    was measured to land at `target/src`, restic 0.19.1). Rather than fork
-    the logic per platform, each path is tried as progressively shorter
-    suffixes - longest first - and the first existing directory wins. Every
-    candidate stays inside the target, so repository metadata cannot aim our
-    walk at arbitrary filesystem paths.
-    """
-    base = Path(target).resolve()
-    for raw in snapshot.paths or []:
-        parts = [p for p in Path(str(raw)).parts
-                 if p not in ("/", "\\") and not p.endswith((":\\", ":/"))]
-        for start in range(len(parts)):
-            candidate = Path(target).joinpath(*parts[start:])
-            try:
-                resolved = candidate.resolve()
-                resolved.relative_to(base)
-            except (OSError, ValueError):
-                continue
-            if resolved.is_dir():
-                return resolved
-    return Path(target)
+    """The shared locator (moved to restic.py in I13); kept as a thin alias so
+    `run`'s call sites and the tests that pin the behavior stay stable."""
+    return resticmod.restored_root(target, snapshot)
 
 
 def _run_payload(entry, snapshot, man, sample, comparison, history_block, root,
@@ -775,6 +812,114 @@ def _cmd_run(args) -> int:
 
 
 # ── report ──────────────────────────────────────────────────────────────────
+
+# ── prove (I13/R48) ────────────────────────────────────────────────
+
+def _prove_failures_line(failures: list[dict], limit: int = 10) -> None:
+    """The failure list for human output; the full list is in --json."""
+    for fail in failures[:limit]:
+        expected = fail.get("expected_size")
+        actual = fail.get("actual_size")
+        size_note = ""
+        if expected is not None or actual is not None:
+            size_note = (f" (listing says {expected if expected is not None else '?'} B, "
+                         f"restored {actual if actual is not None else '?'} B)")
+        print(f"    - {fail['path']}: {fail['reason']}{size_note}")
+    remaining = len(failures) - limit
+    if remaining > 0:
+        print(f"    ... and {remaining} more (full list in --json)")
+
+
+def _cmd_prove(args) -> int:
+    config = cfgmod.load_config(args.config)
+    entry = _resolve_entry(args, config)
+    password_command = entry.password_command or os.environ.get("RESTIC_PASSWORD_COMMAND")
+    repo = entry.repo
+
+    swept = tempstore.sweep_stale()
+    if swept:
+        print(f"  cleaned up {len(swept)} leftover restore dir(s) from a previous run")
+
+    if args.dry_run:
+        if _JSON_MODE:
+            _emit_json(provemod.dry_run_payload(
+                repo, args.sample, args.seed,
+                args.snapshot or cfgmod.DEFAULT_SNAPSHOT))
+            return EXIT_PASS
+        for line in provemod.dry_run_lines(repo, args.sample, args.seed,
+                                           args.snapshot or cfgmod.DEFAULT_SNAPSHOT):
+            print(line)
+        return EXIT_PASS
+
+    started = time.time()
+    snapshot = resticmod.newest_snapshot(repo, password_command,
+                                         args.snapshot or cfgmod.DEFAULT_SNAPSHOT)
+    nodes = resticmod.ls(repo, snapshot.id, password_command)
+    files = provemod.file_list(nodes)
+
+    percent = provemod.parse_percent(args.sample)
+    seed, seed_desc = provemod.resolve_seed(args.seed, snapshot.id)
+    files, excluded = provemod.filter_excludes(files, args.exclude)
+    sample = provemod.sample(files, percent, seed, snapshot_id=snapshot.id)
+
+    print(f"  listing  : {len(files)} file(s) in snapshot {snapshot.short_id}"
+          + (f"; {excluded} excluded" if excluded else ""), file=sys.stderr)
+    print(f"  sampling : {percent}% -> {len(sample)} of {len(files)} file(s); "
+          f"seed {seed_desc}", file=sys.stderr)
+
+    failures: list[dict] = []
+    restore_root = None
+    cleaned = True
+    if sample:
+        with tempstore.restore_dir(repo) as target:
+            resticmod.restore_paths(repo, snapshot.id,
+                                    [f["path"] for f in sample], target,
+                                    password_command=password_command)
+            restore_root = resticmod.restored_root(target, snapshot)
+            failures = provemod.verify_sample(sample, restore_root,
+                                              snapshot_paths=snapshot.paths)
+            cleaned = tempstore.cleanup(target)
+
+    exit_code = EXIT_PASS if not failures else EXIT_DIFF_MISMATCH
+    finished = time.time()
+    history_block = _write_history(historymod.RunRecord(
+        repo=repo,
+        status="pass" if not failures else "diff_mismatch",
+        exit_code=exit_code,
+        started_at=historymod.iso(started),
+        finished_at=historymod.iso(finished),
+        duration_ms=int((finished - started) * 1000),
+        snapshot=snapshot.short_id,
+        file_count=len(files),
+        diff_count=len(failures) or None,
+        tool_version=__version__,
+        schema=SCHEMA_VERSION,
+    ))
+
+    payload = provemod.payload(entry, snapshot, files, percent, seed, seed_desc,
+                               sample, failures, history_block, restore_root,
+                               cleaned, exit_code, args.exclude,
+                               files_excluded=excluded)
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    _deliver_webhook(args, None, payload)
+    if args.json:
+        return exit_code
+
+    mark = "✓" if not failures else "✗"
+    print(f"{mark} proved snapshot {snapshot.short_id}: "
+          f"{len(sample) - len(failures)}/{len(sample)} sampled file(s) verified; "
+          f"{len(failures)} failed")
+    if failures:
+        print("  failures :")
+        _prove_failures_line(failures)
+    print("  verify   : size-only (hashes_available: false — restic ls exposes no "
+          "content hashes; existence + size against restic's own listing)")
+    print(f"  sample   : {percent}% of {len(files)} file(s); seed {seed_desc}")
+    if not cleaned:
+        print(f"  warning  : the temp restore dir at {restore_root} could not be removed")
+    return exit_code
+
 
 FAILURE_REASONS = {
     "diff_mismatch": "the restored data differed from the source",
@@ -1062,8 +1207,8 @@ def _cmd_cron(args) -> int:
 
 # ── dispatch ────────────────────────────────────────────────────────────────
 
-_DISPATCH = {"init": _cmd_init, "run": _cmd_run, "report": _cmd_report,
-             "cron": _cmd_cron}
+_DISPATCH = {"init": _cmd_init, "run": _cmd_run, "prove": _cmd_prove,
+             "report": _cmd_report, "cron": _cmd_cron}
 # Empty since I5a: `cron` was the last pending command, so every command in the
 # parser is now real (gate G6). The helper below stays for the next increment.
 _PENDING: dict[str, str] = {}
@@ -1124,7 +1269,7 @@ def main(argv=None) -> int:
                                  hint=exc.hint, stderr_tail=tail or None)
         _emit_error(kind_of(exc), exc.what, code, command=args.command,
                     hint=exc.hint, stderr_tail=tail or None)
-        if args.command == "run":
+        if args.command in ("run", "prove"):
             # I12: an error outcome is still a verification outcome — the
             # receiver learns about the failure like any other verdict.
             _deliver_webhook(args, None, payload)
@@ -1139,7 +1284,7 @@ def main(argv=None) -> int:
         _emit_error("interrupted", "interrupted before the run finished.",
                     code, command=args.command,
                     hint="re-run when ready; nothing was left behind")
-        if args.command == "run":
+        if args.command in ("run", "prove"):
             _deliver_webhook(args, None, payload)
         return code
 

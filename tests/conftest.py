@@ -42,7 +42,7 @@ FAKE_RESTIC = '''#!/usr/bin/env python3
 # 12, 10 and 3 and worded the restore failure as "unable to load snapshot",
 # which restic does not emit. No shipped code branched on those numbers and no
 # test asserted them, so the fiction was invisible until a real binary ran.
-import json, os, sys
+import json, os, re, sys
 
 LOG = os.environ.get("FAKE_RESTIC_LOG")
 mode = os.environ.get("FAKE_RESTIC_MODE", "ok")
@@ -52,6 +52,24 @@ if LOG:
     with open(LOG, "a", encoding="utf-8") as fh:
         print(" ".join(args), file=fh)
 verb = args[0] if args else ""
+
+# The listing the fake repository serves (I13): the tree files as /srv/data/
+# paths (like a real snapshot of /srv/data) plus three synthetic files whose
+# names carry glob metacharacters and a literal backslash. The synthetics
+# exist ONLY in the listing and the --include-driven restore, so an escaping
+# mistake in the caller shows up as a verification failure, exactly as it
+# would against real restic (measured behaviour, see restic.restore_paths).
+BSLASH = chr(92)
+TREE_PATHS = {"/srv/data/" + rel: bytes.fromhex(blob)
+              for rel, blob in TREE["files"].items()}
+SYNTH_FILES = {
+    "/srv/data/weird[1].txt": b"x" * 9,
+    "/srv/data/back" + BSLASH + "slash.txt": b"y" * 11,
+    "/srv/data/plain.txt": b"z" * 12,
+}
+SNAPSHOT_HEADER = {"struct_type": "snapshot", "id": "9f3a2c00" + "b" * 56,
+                   "short_id": "9f3a2c00", "time": "2026-09-17T10:00:00Z",
+                   "paths": ["/srv/data"]}
 
 if verb == "snapshots":
     if mode == "wrong_password":
@@ -74,13 +92,104 @@ if verb == "snapshots":
     ]))
     sys.exit(0)
 
+if verb == "ls":
+    # NDJSON, one object per line: snapshot header first, then one object per
+    # tree node (measured on restic 0.16.4; file nodes carry size, no hashes).
+    if mode == "wrong_password":
+        print("Fatal: wrong password or no key found", file=sys.stderr)
+        sys.exit(1)
+    if mode == "no_such_repo":
+        print("Fatal: unable to open config file: stat /nope: no such file or directory", file=sys.stderr)
+        sys.exit(1)
+    if mode == "badjson":
+        print("this is not json")
+        sys.exit(0)
+    print(json.dumps(SNAPSHOT_HEADER))
+    if mode != "ls_empty":
+        print(json.dumps({"struct_type": "node", "name": "data", "type": "dir",
+                          "path": "/srv/data"}))
+        for full in sorted(dict(TREE_PATHS, **SYNTH_FILES)):
+            if full == "/srv/data/sub/nested.bin":
+                print(json.dumps({"struct_type": "node", "name": "sub",
+                                  "type": "dir", "path": "/srv/data/sub"}))
+            content = dict(TREE_PATHS, **SYNTH_FILES)[full]
+            print(json.dumps({"struct_type": "node", "type": "file",
+                              "name": os.path.basename(full), "path": full,
+                              "size": len(content)}))
+    sys.exit(0)
+
 if verb == "restore":
     target = args[args.index("--target") + 1]
-    for rel, blob in TREE["files"].items():
-        path = os.path.join(target, rel)
+    includes = []
+    i = 0
+    while "--include" in args[i:]:
+        j = args.index("--include", i)
+        includes.append(args[j + 1])
+        i = j + 2
+
+    def _include_rx(pattern):
+        # restic's include is Go filepath.Match: a backslash escapes the next
+        # byte (so \\\\ matches ONE literal backslash), [[]= matches a literal
+        # '[', '*' and '?' do not cross '/'. A plain fnmatch of the escaped
+        # pattern gets both wrong, which would hide real escaping bugs.
+        # (No string escapes below: the fake must not rot from double-escaping,
+        # and fullmatch() needs no ^/$ anchors.)
+        out = []
+        i = 0
+        while i < len(pattern):
+            c = pattern[i]
+            if c == BSLASH and i + 1 < len(pattern):
+                out.append(re.escape(pattern[i + 1]))
+                i += 2
+            elif c == "*":
+                out.append("[^/]*")
+                i += 1
+            elif c == "?":
+                out.append("[^/]")
+                i += 1
+            elif c == "[":
+                j = pattern.find("]", i)
+                if j == -1:
+                    out.append(re.escape(c))
+                    i += 1
+                else:
+                    body = pattern[i + 1:j]
+                    if body.startswith(("^", "!")):
+                        out.append("[^" + re.escape(body[1:]) + "]")
+                    else:
+                        out.append("[" + re.escape(body) + "]")
+                    i = j + 1
+            else:
+                out.append(re.escape(c))
+                i += 1
+        return re.compile("".join(out))
+
+    rxs = [_include_rx(p) for p in includes]
+
+    def wanted(full):
+        if not rxs:
+            return True
+        return any(rx.fullmatch(full) for rx in rxs)
+
+    for full in sorted(TREE_PATHS):
+        if not wanted(full):
+            continue
+        content = b"" if mode == "corrupt" else TREE_PATHS[full]
+        path = os.path.join(target, full[len("/srv/data/"):])
         os.makedirs(os.path.dirname(path) or target, exist_ok=True)
         with open(path, "wb") as fh:
-            fh.write(bytes.fromhex(blob))
+            fh.write(content)
+    if includes:
+        # Synthetic listing files materialise only on a selective restore —
+        # a plain `run` restore must keep writing exactly the old tree.
+        for full in sorted(SYNTH_FILES):
+            if not wanted(full):
+                continue
+            content = b"" if mode == "corrupt" else SYNTH_FILES[full]
+            path = os.path.join(target, full[len("/srv/data/"):])
+            os.makedirs(os.path.dirname(path) or target, exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(content)
     for rel in TREE["dirs"]:
         os.makedirs(os.path.join(target, rel), exist_ok=True)
     for rel, dest in TREE["links"].items():
