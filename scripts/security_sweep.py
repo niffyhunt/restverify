@@ -51,7 +51,15 @@ REVIEW_ONLY = {"asyncio": "not a network module, but suspicious in a single-thre
 # envelope to an operator-provided https:// URL. Its imports are EXPECTED and
 # do not fail the network row; anything else it ever imports from that list,
 # or any other module importing one of these roots, still fails the sweep.
-EXPECTED_NETWORK = {"webhook.py": {"urllib.request", "urllib.error", "urllib.parse"}}
+EXPECTED_NETWORK = {"webhook.py": {"urllib.request", "urllib.error", "urllib.parse"},
+                    "dashboard.py": {"http.server"}}
+
+# Amended in I14 (R49): dashboard.py is the ONE listener module — a local,
+# read-only history page on the stdlib http.server (no framework). Its import
+# is EXPECTED for the N4 import row and its single serve_forever call site is
+# EXPECTED for the N4 call row; any OTHER module importing a server module or
+# listening still fails both rows.
+EXPECTED_LISTENER = {"dashboard.py": {"http.server", "server.serve_forever"}}
 
 TELEMETRY_WORDS = ["analytics", "telemetry", "sentry", "datadog", "newrelic", "honeycomb",
                    "lightstep", "opentelemetry", "prometheus", "statsd", "mixpanel",
@@ -258,6 +266,10 @@ def build_report(root):
         bad = {}
         for name, names in per_module.items():
             hit = matches(forbidden, names)
+            if group == "N4":
+                # I14 carve-out: dashboard.py's stdlib http.server import is the
+                # ONE expected server import (see EXPECTED_LISTENER above).
+                hit = [h for h in hit if h not in EXPECTED_LISTENER.get(name, set())]
             if hit:
                 bad[name] = hit
             tree = parsed[name][1]
@@ -268,6 +280,8 @@ def build_report(root):
                     bad.setdefault(name, []).extend(f"env:{c}" for c in creds)
             if group == "N4":
                 listening = sorted(listener_calls(tree))
+                expected_listeners = EXPECTED_LISTENER.get(name, set())
+                listening = [l for l in listening if l not in expected_listeners]
                 if listening:
                     bad.setdefault(name, []).extend(listening)
             if group == "N5":

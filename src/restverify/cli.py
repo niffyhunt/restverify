@@ -19,6 +19,7 @@ from . import (EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE,
                SCHEMA_VERSION, __version__)
 from . import compare as comparemod
 from . import config as cfgmod
+from . import dashboard as dashboardmod
 from . import excludes as excludesmod
 from . import history as historymod
 from . import manifest as manifestmod
@@ -39,7 +40,7 @@ DIFF_DISPLAY_LIMIT = 10
 # argparse, and _RAW_ARGV exists solely so a usage error can name its command.
 _JSON_MODE = False
 _RAW_ARGV: list[str] = []
-_KNOWN_COMMANDS = ("init", "run", "report", "cron", "prove")
+_KNOWN_COMMANDS = ("init", "run", "report", "cron", "prove", "dashboard")
 _PRUNE_ANNOUNCED: set[str] = set()   # one retention announcement per repo/process
 
 
@@ -97,6 +98,7 @@ EPILOG = f"""examples:
   restverify run -r /srv/backup            verify the newest snapshot (start here)
   restverify run -r /srv/backup --dry-run  show what would happen; restore nothing
   restverify prove -r /srv/backup          restore a random sample and verify it
+  restverify dashboard                     browse the run history (localhost only)
   restverify init -r /srv/backup           save a repo (with source/excludes) to config
   restverify report                        run history and trend
   restverify cron                          print a ready-to-paste crontab line
@@ -313,6 +315,46 @@ def build_parser() -> argparse.ArgumentParser:
     p_prove.add_argument("-x", "--exclude", action="append", default=[], metavar="PATTERN",
                          help="exclude pattern (repeatable) - honoured by the sample restore")
     _add_common(p_prove)
+
+    p_dash = sub.add_parser(
+        "dashboard", help="show the run history as a local web page (read-only)",
+        description="Serve the run history as one local page and print the URL. "
+                    "Read-only end to end: the history database is opened with SQLite "
+                    "mode=ro (never created, never written), and the page is plain "
+                    "HTML from the standard library - no framework, no JavaScript, "
+                    "no form, no external resource.",
+        epilog="examples:\n"
+               "  restverify dashboard                 print a http://127.0.0.1:PORT/ URL\n"
+               "  restverify dashboard --port 8765     a fixed port instead of a random one\n"
+               "\nwhat it shows:\n"
+               "  the newest 50 runs (started, status, exit code, repo, snapshot,\n"
+               "  duration), newest first, plus a pass/mismatch/error summary line.\n"
+               "  A missing history store renders a no-runs-yet page, not an error.\n"
+               "\nsecurity posture (each pinned by a test):\n"
+               "  binds 127.0.0.1 by default; --bind-all is REFUSED (exit 64, before\n"
+               "  any socket exists) unless paired with --yes-i-know. The Host header\n"
+               "  must name the bound address (or localhost) - a DNS-rebinding page\n"
+               "  cannot aim a browser here (with --bind-all that check is skipped:\n"
+               "  you widened it on purpose). Every value from the database is\n"
+               "  html.escape()d; responses carry CSP default-src 'none';\n"
+               "  style-src 'unsafe-inline', X-Content-Type-Options: nosniff and\n"
+               "  Cache-Control: no-store. GET/HEAD on / only - other paths 404,\n"
+               "  other methods 405. Request logs never repeat query strings.\n"
+               "\nthis command serves; it never mutates:\n"
+               "  no run row is written, no restic call is made, and Ctrl-C exits\n"
+               "  cleanly (0). It is a viewer for `restverify report` people who\n"
+               "  prefer a browser, not a second writer of history.\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_dash.add_argument("--port", metavar="N", type=dashboardmod.port_arg, default=0,
+                        help="port to bind (default: 0, a random free port); "
+                             "0-65535, validated before any socket exists")
+    p_dash.add_argument("--bind-all", action="store_true",
+                        help="bind 0.0.0.0 instead of 127.0.0.1 (LAN-visible). "
+                             "Requires --yes-i-know; refused otherwise")
+    p_dash.add_argument("--yes-i-know", action="store_true",
+                        help="confirm you understand --bind-all exposes the page "
+                             "to your network")
+    _add_common(p_dash)
 
     p_report = sub.add_parser(
         "report", help="show run history and trend",
@@ -1228,10 +1270,44 @@ def _cmd_cron(args) -> int:
     return EXIT_PASS
 
 
+# ── dashboard (I14/R49) ────────────────────────────────────────────
+
+def _cmd_dashboard(args) -> int:
+    """Serve the read-only history page (I14). Refusals happen BEFORE any
+    socket exists; a missing store is a page, not an error; Ctrl-C is a clean 0."""
+    if args.bind_all and not args.yes_i_know:
+        raise ConfigError(
+            "--bind-all would expose the dashboard to your whole network.",
+            hint="re-run with --yes-i-know if that is really what you want "
+                 "(--bind-all --yes-i-know), or keep the default localhost bind",
+        )
+    host = "0.0.0.0" if args.bind_all else "127.0.0.1"
+    db_path = historymod.state_path()          # the history.db file itself
+    if not db_path.exists():
+        print(f"  note: no history store yet at {db_path} — the page will say "
+              "so until the first run lands", file=sys.stderr)
+    try:
+        server = dashboardmod.make_server(host, args.port, db_path)
+    except OSError as exc:
+        raise ConfigError(
+            f"could not bind {host}:{args.port}: {exc}",
+            hint="pick another port with --port N (0 lets the OS choose a free one)",
+        ) from exc
+    port = server.server_address[1]
+    print(f"restverify dashboard serving http://{host}:{port}/ (Ctrl-C to stop)",
+          file=sys.stderr)
+    print(f"  read-only: history is opened mode=ro; the page is stdlib HTML "
+          "(no JS, no form)", file=sys.stderr)
+    # dashboard.py owns the serve_forever call site (the ONE listener module);
+    # KeyboardInterrupt is handled inside — Ctrl-C exits cleanly with 0.
+    dashboardmod.serve(server)
+    return EXIT_PASS
+
+
 # ── dispatch ────────────────────────────────────────────────────────────────
 
 _DISPATCH = {"init": _cmd_init, "run": _cmd_run, "prove": _cmd_prove,
-             "report": _cmd_report, "cron": _cmd_cron}
+             "report": _cmd_report, "cron": _cmd_cron, "dashboard": _cmd_dashboard}
 # Empty since I5a: `cron` was the last pending command, so every command in the
 # parser is now real (gate G6). The helper below stays for the next increment.
 _PENDING: dict[str, str] = {}

@@ -23,9 +23,17 @@ SHIPPED = sorted(SRC.rglob("*.py"))
 # Amended in I12 (R47, operator-approved spec): webhook.py is the ONE module
 # allowed outbound network (urllib.request) — the network-modules row of the
 # sweep now reports webhook.py's imports as EXPECTED rather than forbidden.
+# Amended in I14 (R49): dashboard.py is the ONE listener module (stdlib
+# http.server, localhost read-only page) — EXPECTED_LISTENER below names it
+# for the N4 import row; its serve_forever call site is pinned separately by
+# test_dashboard's own binding assertions, and every OTHER module importing
+# http.server/socketserver/ssl still fails.
 NETWORK_MODULES = ["socket", "ssl", "urllib", "urllib2", "urllib3", "http", "requests",
                    "aiohttp", "httpx", "ftplib", "smtplib", "telnetlib", "xmlrpc"]
-EXPECTED_NETWORK = {"webhook.py": {"urllib.request", "urllib.error", "urllib.parse"}}
+EXPECTED_NETWORK = {"webhook.py": {"urllib.request", "urllib.error", "urllib.parse"},
+                    "dashboard.py": {"http.server"}}
+EXPECTED_LISTENER = {"dashboard.py": {"http.server"}}
+_SERVER_MODULES = ("http.server", "socketserver", "ssl")
 TELEMETRY_WORDS = ["analytics", "telemetry", "sentry", "datadog", "newrelic", "honeycomb",
                    "lightstep", "opentelemetry", "prometheus", "statsd", "mixpanel",
                    "amplitude", "segment", "posthog", "matomo", "plausible"]
@@ -106,6 +114,24 @@ def test_no_network_module_is_imported():
         if extra or missing:
             hits[module] = {"unexpected": extra, "missing": missing}
     assert hits == {}, f"network module imported outside the I12 boundary: {hits}"
+
+
+def test_no_server_module_outside_the_dashboard_boundary():
+    """Amended in I14 (R49): dashboard.py is the ONE listener module. Its
+    stdlib http.server import is EXPECTED; server modules in ANY other module
+    are still a failure (see test_n4_no_listener_call_or_server_module for the
+    call-site half, whose dashboard carve-out lives in the I14 commit too)."""
+    hits = {}
+    for module, names in _imports().items():
+        found = sorted(n for n in names
+                       if n in _SERVER_MODULES
+                       or any(n.startswith(m + ".") for m in _SERVER_MODULES))
+        expected = sorted(EXPECTED_LISTENER.get(module, set()))
+        extra = sorted(set(found) - set(expected))
+        missing = sorted(set(expected) - set(found))
+        if extra or missing:
+            hits[module] = {"unexpected": extra, "missing": missing}
+    assert hits == {}, f"server/ssl module imported outside the I14 boundary: {hits}"
 
 
 def test_no_telemetry_symbol_or_vendor_url():

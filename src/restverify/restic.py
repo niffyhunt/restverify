@@ -319,8 +319,9 @@ def check_data_subset(repo: str, percent: int,
 
     percent is the share of PACKS (restic's unit, not files); 100 becomes a
     full `--read-data`. Returns (ok, one_line_detail); a non-zero exit is a
-    verdict (False), not a could-not-complete (the process ran to completion).
-    A hard spawn failure still raises ResticFailed via run().
+    verdict (False), not a could-not-complete — EXCEPT a locked repository,
+    which raises ResticFailed (exit 1): nothing was read, so there is no data
+    verdict to report. A hard spawn failure still raises ResticFailed.
     """
     if percent >= 100:
         args = ["check", "--read-data", "--repo", repo]
@@ -329,9 +330,30 @@ def check_data_subset(repo: str, percent: int,
     proc = run(args, password_command, check=False)
     if proc.returncode == 0:
         return True, "restic check (read-data) found no errors"
+    # Pick the detail from restic's own structure, not a substring guess:
+    # measured failure outputs include the "<n> error(s) while reading data"
+    # line for real corruption, and for a locked repository
+    # "unable to create lock in backend: repository is already locked by PID
+    # <n>" plus the advice "the `unlock` command can be used to remove stale
+    # locks" — a naive substring filter matches restic's ADVICE instead of
+    # its finding, which misreports a lock as corruption.
     tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-    detail = next((l for l in tail if "error" in l.lower()),
-                  tail[-1] if tail else f"exit {proc.returncode}")
+    joined = "\n".join(tail)
+    if "already locked" in joined or "unable to create lock" in joined:
+        # A locked repository is could-not-complete (exit 1, restic_failed),
+        # NEVER a data verdict: nothing was read, so nothing failed.
+        raise ResticFailed(
+            "the repository is locked by another restic process.",
+            stderr_tail=next((l for l in tail if "already locked" in l
+                              or "unable to create lock" in l), "")[:200],
+            hint="wait for the other process, or remove a stale lock with "
+                 "`restic -r <repo> unlock` (check the PID first)",
+        )
+    candidates = [l for l in tail
+                  if l.strip() and not l.strip().startswith(("the `", "`"))
+                  and "can be used to" not in l]
+    detail = next((l for l in candidates if "error" in l.lower()),
+                  candidates[-1] if candidates else f"exit {proc.returncode}")
     return False, detail[:200]
 
 

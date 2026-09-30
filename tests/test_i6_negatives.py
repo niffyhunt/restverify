@@ -242,15 +242,27 @@ def test_n4_no_web_framework_import(forbidden):
 
 
 def test_n4_no_listener_call_or_server_module():
+    """Amended in I14 (R49, operator-approved spec): dashboard.py is the ONE
+    listener module — a local, read-only history page on the stdlib
+    http.server (no framework, no JS, mode=ro store, Host-header check). It
+    may own exactly http.server as its server import and
+    server.serve_forever as its single listening call site; EVERY other
+    module with either is still a failure."""
+    allowed_calls = {"dashboard.py": {"server.serve_forever"}}
+    allowed_imports = {"dashboard.py": {"http.server"}}
     calls = {name: sorted(_listener_calls(tree)) for name, tree in _trees().items()}
-    assert {k: v for k, v in calls.items() if v} == {}, \
-        f"N4: something listens for connections: {calls}"
+    offenders = {name: sorted(set(v) - allowed_calls.get(name, set()))
+                 for name, v in calls.items()}
+    offenders = {name: v for name, v in offenders.items() if v}
+    assert offenders == {}, f"N4: something listens for connections: {offenders}"
     servers = {name: sorted(i for i in names
                             if i in _SERVER_MODULES
                             or any(i.startswith(m + ".") for m in _SERVER_MODULES))
                for name, names in _imports().items()}
-    assert {k: v for k, v in servers.items() if v} == {}, \
-        f"N4: server/ssl module imported: {servers}"
+    server_offenders = {name: sorted(set(v) - allowed_imports.get(name, set()))
+                        for name, v in servers.items()}
+    server_offenders = {name: v for name, v in server_offenders.items() if v}
+    assert server_offenders == {}, f"N4: server/ssl module imported: {server_offenders}"
 
 
 # ── N5: no notification SDK, no webhook call ──────────────────────────────
