@@ -40,15 +40,19 @@ jobs:
   drill:
     runs-on: ubuntu-latest
     timeout-minutes: 10     # the plan's gate: the drill must stay under 10 min
-    env:
-      # R43: relocate the whole restverify layout out of the runner's real
-      # home — config and state land under this one subtree.
-      RESTVERIFY_HOME: ${{ runner.temp }}/rv-home
+    # NOTE: no job-level env here — GitHub rejects the `runner` context in
+    # jobs.<id>.env ("Unrecognized named-value: 'runner'"), which kills the
+    # whole workflow file before any job starts. RESTVERIFY_HOME is set as
+    # step-level env on both steps below, where the runner context is allowed.
     steps:
       - uses: actions/checkout@v4
 
       - name: Restore-drill (happy fixture proof + your repository)
         uses: niffyhunt/restverify/.github/actions/restore-drill@v0.3.0  # override only if you fork elsewhere
+        env:
+          # R43: relocate the whole restverify layout out of the runner's
+          # real home — config and state land under this one subtree.
+          RESTVERIFY_HOME: ${{ runner.temp }}/rv-home
         with:
           version: '0.2.1'
           # base_url: override if your release lives elsewhere
@@ -57,6 +61,9 @@ jobs:
 
       - name: Drill your repository
         shell: bash
+        env:
+          # R43: same relocation for your own drill leg.
+          RESTVERIFY_HOME: ${{ runner.temp }}/rv-home
         run: |
           set -euo pipefail
           export RESTIC_PASSWORD_COMMAND="${{ secrets.RESTIC_PASSWORD_COMMAND }}"

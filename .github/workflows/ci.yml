@@ -33,8 +33,11 @@ jobs:
     name: restore-drill self-test (happy 0 / tamper 2)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      RESTVERIFY_HOME: ${{ runner.temp }}/rv-home
+    # NOTE: no job-level env here — GitHub rejects the `runner` context in
+    # jobs.<id>.env ("Unrecognized named-value: 'runner'"), which kills the
+    # whole workflow file before any job starts (0 jobs, 0 logs). Both
+    # RESTVERIFY_HOME and DRILL_PASS_FILE are set as step-level env on the
+    # action step below, where the runner context is allowed.
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +76,11 @@ jobs:
       - name: 'Run the shipped composite action against the staged artefact'
         uses: ./.github/actions/restore-drill
         env:
+          # R43: relocate config+state out of the runner's real home.
+          RESTVERIFY_HOME: ${{ runner.temp }}/rv-home
+          # Pin the pass file drill.sh re-derives to the exact path the
+          # fixture above was built with (restic stores the password_command
+          # string; a mismatch here is "cat: No such file" → exit 1).
           DRILL_PASS_FILE: ${{ runner.temp }}/drill-pass
         with:
           version: '${{ steps.stage.outputs.version }}'
