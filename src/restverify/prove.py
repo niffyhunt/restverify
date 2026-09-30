@@ -3,13 +3,25 @@
 Logic only: every restic invocation happens in restic.py (Single Spawner rule),
 every filesystem write happens in tempstore-controlled dirs.
 
-The verification is SIZE-ONLY by nature, and this is honest scope, not a
-shortcut: `restic ls --json` exposes no content hashes (measured on restic
-0.16.4 — file nodes carry name/type/path/size/…, no blob id, no hash), so the
-strongest claim a `prove` run can make is existence + size against restic's own
-listing. It still bites: with one flipped byte in a real pack, `restic restore`
-exits 0 and writes a 0-byte file where the listing says 12 bytes (measured) —
-this size check catches exactly that.
+The verification has two layers, and the module docstring states both:
+
+1. Sampled-file check (existence + size) against restic's own `ls --json`
+   listing. SIZE-ONLY per file, honestly stated: ls exposes no content hashes
+   (measured on restic 0.16.4), so per-file content comparison without a
+   source is impossible. It still bites: with one flipped byte in a real
+   pack, `restic restore` exits 0 writing a 0-byte file where the listing
+   says 12 bytes — this layer catches exactly that.
+
+2. Content integrity over the same share: `restic check --read-data-subset
+   N%` reads that share of the repository's data packs and verifies the
+   repository's cryptographic seals (100% → full --read-data). Measured: a
+   flipped byte leaves restore exiting 0 while check reports "repository
+   contains errors" — this layer catches corruptions the size check cannot
+   see (e.g. a zero-for-zero byte swap).
+
+The original build shipped layer 1 only and called it "honest scope"; the
+operator rejected that framing and layer 2 was added in this same commit
+series. The ruling is recorded in tests/test_i13_prove.py.
 
 Sampling is deterministic: the same (file list, percent, seed) always yields
 the same sample. The default seed is derived from the snapshot id, so runs are
@@ -488,8 +500,9 @@ def dry_run_lines(repo: str, percent, seed, selector: str) -> list[str]:
         f"  snapshot : {selector}",
         f"  sample   : {percent}% of the snapshot's files (deterministic; default seed "
         f"derived from the snapshot id)",
-        f"  verify   : existence + size of every sampled file (size-only; restic ls "
-        f"exposes no content hashes)",
+        f"  verify   : existence + size of every sampled file (restic ls exposes no "
+        f"per-file hashes), plus restic check --read-data-subset over the same "
+        f"share of data packs",
         "✓ PASS (dry run) — nothing was restored, nothing was recorded",
     ]
 
@@ -516,14 +529,15 @@ def dry_run_payload(repo: str, percent, seed, selector: str) -> dict:
 def payload(entry, snapshot, files: list[dict], percent: int, seed: int, seed_desc: str,
             sample: list[dict], failures: list[dict], history_block: dict,
             restore_root, cleaned: bool, exit_code: int, excludes: list[str],
-            files_excluded: int = 0) -> dict:
+            files_excluded: int = 0, check_ok: bool = True,
+            check_line: str = "") -> dict:
     verified = len(sample) - len(failures)
     return {
         "tool": PROG,
         "schema": SCHEMA_VERSION,
         "version": __version__,
         "command": "prove",
-        "status": "pass" if not failures else "diff_mismatch",
+        "status": "pass" if (not failures and check_ok) else "diff_mismatch",
         "exit_code": exit_code,
         "history": history_block,
         "snapshot": {
@@ -538,6 +552,13 @@ def payload(entry, snapshot, files: list[dict], percent: int, seed: int, seed_de
             "files_verified": verified,
             "files_failed": len(failures),
             "hashes_available": False,
+            "content_check": {
+                "performed": bool(sample),
+                "ok": check_ok,
+                "detail": check_line,
+                "note": "restic check --read-data-subset verifies the repository's "
+                        "cryptographic seals over the same share of data packs",
+            },
             "percent": percent,
             "seed": seed,
             "seed_desc": seed_desc,

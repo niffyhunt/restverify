@@ -209,7 +209,11 @@ def test_prove_happy_path_exit_0_counts_consistent(fake_restic, tmp_base, capsys
     verbs = fake_restic.verbs()
     assert verbs[0] == "snapshots" and "ls" in verbs
     assert "restore" in verbs
-    assert all(v in ("snapshots", "ls", "restore") for v in verbs)
+    assert "check" in verbs            # the content-integrity layer
+    assert all(v in ("snapshots", "ls", "restore", "check") for v in verbs)
+    prov = payload["prove"]
+    assert prov["content_check"]["performed"] is True
+    assert prov["content_check"]["ok"] is True
 
 
 def test_prove_restores_exactly_the_sampled_paths(fake_restic, tmp_base, capsys):
@@ -249,6 +253,51 @@ def test_prove_corruption_is_exit_2_with_failures(fake_restic, tmp_base, capsys)
     assert prov["files_verified"] == prov["files_sampled"] - prov["files_failed"]
     assert all({"path", "reason", "expected_size", "actual_size"} <= set(f)
                for f in prov["failures"])
+
+
+def test_prove_runs_read_data_subset_over_the_sample_share(fake_restic, tmp_base):
+    """The content check verifies the SAME share of packs as the file sample.
+    100% must become a full --read-data (restic's flag, not a fake '100%')."""
+    main(["prove", "-r", "/srv/backup", "--sample", "25"])
+    check_calls = [c for c in fake_restic.calls() if c.startswith("check")]
+    assert check_calls == ["check --read-data-subset 25% --repo /srv/backup"]
+    main(["prove", "-r", "/srv/backup", "--sample", "100"])
+    check_calls = [c for c in fake_restic.calls() if c.startswith("check")]
+    assert check_calls[-1] == "check --read-data --repo /srv/backup"
+
+
+def test_prove_check_failure_is_exit_2_data_verdict(fake_restic, tmp_base, capsys):
+    """A failed seal is a DATA verdict (exit 2), not could-not-complete: the
+    check ran to completion and the data did not verify."""
+    fake_restic.set_mode("check_fails")
+    code = main(["prove", "-r", "hmm", "--sample", "100", "--json"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert code == EXIT_DIFF_MISMATCH
+    assert payload["status"] == "diff_mismatch" and payload["exit_code"] == 2
+    assert payload["prove"]["files_failed"] == 0      # sizes were fine
+    assert payload["prove"]["content_check"]["ok"] is False
+    assert "errors" in payload["prove"]["content_check"]["detail"]
+
+
+def test_prove_check_is_skipped_when_nothing_is_sampled(fake_restic, tmp_base, capsys):
+    fake_restic.set_mode("ls_empty")
+    code = main(["prove", "-r", "/srv/backup", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == EXIT_PASS
+    assert payload["prove"]["content_check"]["performed"] is False
+    assert "check" not in fake_restic.verbs()          # no pointless restic run
+
+
+def test_prove_check_catches_what_the_size_check_cannot(fake_restic, tmp_base, capsys):
+    """The operator ruling (2026-09-30): 'why can't honest scope be fixed'.
+    The size check alone would pass a corruption that swaps bytes without
+    changing lengths; the seal check does not. Both layers must run."""
+    fake_restic.set_mode("check_fails")
+    code = main(["prove", "-r", "/srv/backup", "--json"])
+    assert code == EXIT_DIFF_MISMATCH                  # sizes pass, seal fails
+    verbs = fake_restic.verbs()
+    assert "restore" in verbs and "check" in verbs
 
 
 def test_prove_history_row_written_like_run(fake_restic, tmp_base):

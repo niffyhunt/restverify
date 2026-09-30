@@ -254,10 +254,12 @@ def build_parser() -> argparse.ArgumentParser:
         "prove", help="restore a random sample of files and verify them against "
                       "the snapshot listing",
         description="Prove a snapshot by restoring a random sample of its files and "
-                    "verifying each one against restic's own listing. Size-only by "
-                    "nature: `restic ls --json` exposes no content hashes (measured "
-                    "on restic 0.16.4), so hashes_available is false and the claim "
-                    "is existence + size.",
+                    "verifying each one against restic's own listing, PLUS a "
+                    "cryptographic content check over the same share of the "
+                    "repository's data packs (restic check --read-data-subset). "
+                    "Per-file hashes are unavailable (ls --json exposes none), so "
+                    "the per-file claim is existence + size; the content claim is "
+                    "restic's own seal verification.",
         epilog="examples:\n"
                "  restverify prove -r /srv/backup                 prove 10% of the newest snapshot\n"
                "  restverify prove -r /srv/backup --sample 100    restore and check every file\n"
@@ -273,12 +275,16 @@ def build_parser() -> argparse.ArgumentParser:
                "  list, same percent, same seed -> same sample.\n"
                "\nverification (this build):\n"
                "  only the sampled paths are restored (restic restore --include, one\n"
-               "  glob-escaped pattern per path). Each sampled file must exist and its\n"
-               "  size must equal the snapshot record; content is NOT hashed (restic\n"
-               "  ls exposes no hashes - this is honest scope, not a shortcut). Why\n"
-               "  size still bites: with one flipped byte in a real pack, `restic\n"
-               "  restore` exits 0 and writes a 0-byte file where the listing says\n"
-               "  12 bytes - prove catches that (measured, restic 0.16.4).\n"
+               "  glob-escaped pattern per path). Each sampled file must exist and\n"
+               "  its size must equal the snapshot record. Per-file hashes are\n"
+               "  unavailable (restic ls exposes none), so the per-file claim is\n"
+               "  existence + size; content integrity comes from `restic check\n"
+               "  --read-data-subset N%` over the SAME share (N = --sample; --sample\n"
+               "  100 runs a full --read-data), which verifies the repository's own\n"
+               "  cryptographic seals. Measured, restic 0.16.4: one flipped byte in\n"
+               "  a pack leaves `restore` exiting 0 with a 0-byte file (the size\n"
+               "  check catches that one) while `check` reports the corruption -\n"
+               "  prove catches both.\n"
                "\nexit codes:\n"
                "  0   every sampled file verified (also: the snapshot lists no files)\n"
                "  1   the run could not complete (restic failed, no snapshots, bad ls)\n"
@@ -287,9 +293,10 @@ def build_parser() -> argparse.ArgumentParser:
                "\njson envelope (--json):\n"
                "  same top-level keys as run (schema 1, stdout purity, error kinds),\n"
                "  with `prove` in place of `compare`: files_listed, files_sampled,\n"
-               "  files_verified, files_failed, hashes_available, percent, seed,\n"
-               "  failures (path/reason/expected_size/actual_size), restore and\n"
-               "  history blocks. History rows are written exactly like run's.\n",
+               "  files_verified, files_failed, hashes_available, content_check\n"
+               "  (performed/ok/detail), percent, seed, failures\n"
+               "  (path/reason/expected_size/actual_size), restore and history\n"
+               "  blocks. History rows are written exactly like run's.\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_prove.add_argument("-r", "--repo", metavar="PATH",
                          help="restic repository (or a repo name saved in the config)")
@@ -880,7 +887,20 @@ def _cmd_prove(args) -> int:
                                               snapshot_paths=snapshot.paths)
             cleaned = tempstore.cleanup(target)
 
-    exit_code = EXIT_PASS if not failures else EXIT_DIFF_MISMATCH
+    # Content integrity (I13 follow-up, operator ruling: "why can't honest
+    # scope be fixed"): ls --json has no per-file hashes, but the repository
+    # SEALS its data. `restic check --read-data-subset N%` reads the same
+    # share of packs and verifies the seal — catching corruptions the size
+    # check alone cannot see (measured: restore exits 0 on a flipped byte,
+    # check does not). Same percent as the sample; --sample 100 = full
+    # --read-data. A failed check is a DATA verdict (exit 2), not a
+    # could-not-complete: the check ran and the data did not verify.
+    check_ok, check_line = True, "skipped (nothing sampled)"
+    if sample:
+        check_ok, check_line = resticmod.check_data_subset(repo, percent,
+                                                           password_command)
+
+    exit_code = EXIT_PASS if (not failures and check_ok) else EXIT_DIFF_MISMATCH
     finished = time.time()
     history_block = _write_history(historymod.RunRecord(
         repo=repo,
@@ -899,22 +919,25 @@ def _cmd_prove(args) -> int:
     payload = provemod.payload(entry, snapshot, files, percent, seed, seed_desc,
                                sample, failures, history_block, restore_root,
                                cleaned, exit_code, args.exclude,
-                               files_excluded=excluded)
+                               files_excluded=excluded, check_ok=check_ok,
+                               check_line=check_line)
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     _deliver_webhook(args, None, payload)
     if args.json:
         return exit_code
 
-    mark = "✓" if not failures else "✗"
+    mark = "✓" if (not failures and check_ok) else "✗"
     print(f"{mark} proved snapshot {snapshot.short_id}: "
           f"{len(sample) - len(failures)}/{len(sample)} sampled file(s) verified; "
           f"{len(failures)} failed")
     if failures:
         print("  failures :")
         _prove_failures_line(failures)
-    print("  verify   : size-only (hashes_available: false — restic ls exposes no "
-          "content hashes; existence + size against restic's own listing)")
+    print(f"  content  : {check_line}")
+    print("  verify   : sampled files checked for existence + size (restic ls exposes "
+          "no per-file hashes), PLUS restic check --read-data-subset for "
+          "cryptographic content integrity over the same share of packs")
     print(f"  sample   : {percent}% of {len(files)} file(s); seed {seed_desc}")
     if not cleaned:
         print(f"  warning  : the temp restore dir at {restore_root} could not be removed")

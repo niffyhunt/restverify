@@ -22,8 +22,12 @@ from pathlib import Path, PurePath
 from .errors import NoSnapshots, ResticFailed, ResticMissing
 
 # Verbs that only read. Everything restverify ships must be one of these.
+# `check` reads (with --read-data* it reads DATA, cryptographically verified
+# inside restic); it never mutates the repository — I14-followup measurement:
+# a flipped byte in a pack leaves `restore` exiting 0 with a truncated file
+# while `check` reports "repository contains errors".
 READONLY_VERBS = frozenset({"snapshots", "restore", "ls", "cat", "find",
-                            "stats", "diff", "dump", "version"})
+                            "stats", "diff", "dump", "version", "check"})
 # Verbs that mutate a repository or belong to other tools (N1, N2, N6).
 FORBIDDEN_VERBS = frozenset({"backup", "forget", "prune", "init", "unlock",
                              "key", "migrate", "repair", "rewrite", "mount",
@@ -297,6 +301,38 @@ def ls(repo: str, snapshot_id: str, password_command: str | None = None) -> list
         if item.get("struct_type") == "node":
             nodes.append(item)
     return nodes
+
+
+def check_data_subset(repo: str, percent: int,
+                      password_command: str | None = None) -> tuple[bool, str]:
+    """`restic check --read-data-subset N%` for `prove` (I13): real CONTENT
+    verification over a random subset of the repository's data packs.
+
+    Why: `ls --json` exposes no per-file hashes, so per-file content comparison
+    needs a source — but the repository format seals every blob (AEAD), and
+    `check --read-data*` verifies that seal by reading the data back. Measured
+    on restic 0.16.4: a single flipped byte in a pack makes `restore` exit 0
+    with a truncated file (the size check catches that one), while `check`
+    reports "repository contains errors" and exits non-zero — catching every
+    other corruption too, including zero-byte-for-zero-byte swaps the size
+    check cannot see.
+
+    percent is the share of PACKS (restic's unit, not files); 100 becomes a
+    full `--read-data`. Returns (ok, one_line_detail); a non-zero exit is a
+    verdict (False), not a could-not-complete (the process ran to completion).
+    A hard spawn failure still raises ResticFailed via run().
+    """
+    if percent >= 100:
+        args = ["check", "--read-data", "--repo", repo]
+    else:
+        args = ["check", f"--read-data-subset", f"{percent}%", "--repo", repo]
+    proc = run(args, password_command, check=False)
+    if proc.returncode == 0:
+        return True, "restic check (read-data) found no errors"
+    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    detail = next((l for l in tail if "error" in l.lower()),
+                  tail[-1] if tail else f"exit {proc.returncode}")
+    return False, detail[:200]
 
 
 def restored_root(target, snapshot) -> "object":

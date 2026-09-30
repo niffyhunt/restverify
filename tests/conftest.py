@@ -203,6 +203,18 @@ if verb == "restore":
     print("restored")
     sys.exit(0)
 
+if verb == "check":
+    # Mirrors the measured real behaviour: healthy repo exits 0; a corrupted
+    # pack makes real restic exit non-zero with "repository contains errors"
+    # while `restore` still exits 0 — which is exactly why prove runs check.
+    if mode == "check_fails":
+        print("checking 3 packs", file=sys.stderr)
+        print("pack 0006: damaged and cannot be repaired", file=sys.stderr)
+        print("Fatal: repository contains errors", file=sys.stderr)
+        sys.exit(1)
+    print("no errors were found", file=sys.stderr)
+    sys.exit(0)
+
 print("fake restic: unexpected verb %s" % verb, file=sys.stderr)
 sys.exit(1)
 '''.replace("__FAKE_TREE__", f"json.loads({FAKE_TREE_JSON!r})")
