@@ -40,7 +40,7 @@ restverify is that script, done properly: one command, a recorded history,
 a machine-readable JSON envelope, and a 442-test suite that is verified
 against real `restic` repositories — including a 1.02 GiB / 1253-file drill
 over an SFTP backend run as an unprivileged user
-([transcript](docs/I9-DRILL.md)).
+([transcript](https://github.com/niffyhunt/restverify/blob/main/docs/I9-DRILL.md)).
 
 ## Quick start
 
@@ -229,7 +229,7 @@ swept automatically by the next run. Requires `docker` (or a compatible
 runtime) on PATH with socket access for your user — never sudo. The gate was
 drilled against real Docker: a clean sandboxed run, a SIGKILL mid-restore,
 and proof the next run swept the orphan and finished with zero leftovers
-([transcript](docs/I11-SANDBOX.md)).
+([transcript](https://github.com/niffyhunt/restverify/blob/main/docs/I11-SANDBOX.md)).
 
 Verification, history and exit codes are identical with or without `--sandbox`.
 
@@ -238,12 +238,12 @@ Verification, history and exit codes are identical with or without `--sandbox`.
 The restore drill ships as a reusable GitHub Action in this repository, so
 your backup repo can drill itself on a schedule:
 
-- [`.github/actions/restore-drill/`](.github/actions/restore-drill) — installs
+- [`.github/actions/restore-drill/`](https://github.com/niffyhunt/restverify/blob/main/.github/actions/restore-drill) — installs
   restic, downloads the **released** restverify wheel pinned to a version,
   verifies its GPG signature against the release key shipped inside the
   action, and runs two drills: a healthy fixture must exit 0, and a tampered
   fixture (one flipped byte) must exit 2.
-- [`templates/ci-drill/`](templates/ci-drill) — a ready-made scheduled
+- [`templates/ci-drill/`](https://github.com/niffyhunt/restverify/blob/main/templates/ci-drill) — a ready-made scheduled
   workflow (point it at your restic repo via secrets) and `drill.sh`, the
   same drill as a standalone script for plain cron, systemd timers, or any
   other CI.
@@ -272,11 +272,11 @@ gpg --verify restverify-0.3.0-py3-none-any.whl.asc restverify-0.3.0-py3-none-any
 Release key: RSA3072, fingerprint
 `C5F735E977D4D45C1663AA40E4CE56B6CEF87373`, identity *restverify release
 signing*; the armored public key ships at
-[`docs/release-key.asc`](docs/release-key.asc). Recorded sha256 digests for
+[`docs/release-key.asc`](https://github.com/niffyhunt/restverify/blob/main/docs/release-key.asc). Recorded sha256 digests for
 the current release and its validation transcript are in
-[`docs/RELEASE-VALIDATION-0.3.0.md`](docs/RELEASE-VALIDATION-0.3.0.md); the
+[`docs/RELEASE-VALIDATION-0.3.0.md`](https://github.com/niffyhunt/restverify/blob/main/docs/RELEASE-VALIDATION-0.3.0.md); the
 0.2.1 upgrade drill (exit-code matrix, artefact digests) remains at
-[`docs/RELEASE-VALIDATION-0.2.1.md`](docs/RELEASE-VALIDATION-0.2.1.md).
+[`docs/RELEASE-VALIDATION-0.2.1.md`](https://github.com/niffyhunt/restverify/blob/main/docs/RELEASE-VALIDATION-0.2.1.md).
 
 ## History and trends
 
@@ -305,15 +305,15 @@ still win.
   and your restic binary.
 - Restores go to `0700` private temp dirs; nothing persists; source paths are
   never written.
-- Details and their rationale: [`docs/SECURITY.md`](docs/SECURITY.md).
+- Details and their rationale: [`docs/SECURITY.md`](https://github.com/niffyhunt/restverify/blob/main/docs/SECURITY.md).
 
 ## Platform notes
 
-- **Linux** — fully drilled (real restic 0.16.4, real Docker, SFTP backend,
-  unprivileged user).
+- **Linux** — fully drilled: real restic 0.16.4, real Docker for `--sandbox`,
+  SFTP backend, unprivileged user.
 - **Windows** — the full test suite and the run pipeline work natively
-  (real `restic.exe`, Windows-cut release artefacts). `--sandbox` needs a
-  container runtime and is out of scope there.
+  (real `restic.exe`, Windows-cut release artefacts). `--sandbox` is the one
+  Linux-only feature.
 - restic: read-only verbs only, tested against 0.16.4; any recent restic
   should behave identically. If yours doesn't, that's a bug — please open an
   issue with the transcript.
@@ -334,13 +334,13 @@ still win.
 
 | Doc | Contents |
 |-----|----------|
-| [`CHANGELOG.md`](CHANGELOG.md) | every release, honestly annotated |
-| [`docs/SECURITY.md`](docs/SECURITY.md) | security posture and its rationale |
-| [`docs/RELEASE.md`](docs/RELEASE.md) | how releases are cut and signed |
-| [`docs/RELEASE-VALIDATION-0.2.1.md`](docs/RELEASE-VALIDATION-0.2.1.md) | upgrade drill, exit-code matrix, release digests |
-| [`docs/I9-DRILL.md`](docs/I9-DRILL.md) | the 1 GiB / 1253-file scale drill |
-| [`docs/I10-CI.md`](docs/I10-CI.md) | the CI drill, rehearsed |
-| [`docs/I11-SANDBOX.md`](docs/I11-SANDBOX.md) | the sandbox gate |
+| [`CHANGELOG.md`](https://github.com/niffyhunt/restverify/blob/main/CHANGELOG.md) | every release, honestly annotated |
+| [`docs/SECURITY.md`](https://github.com/niffyhunt/restverify/blob/main/docs/SECURITY.md) | security posture and its rationale |
+| [`docs/RELEASE.md`](https://github.com/niffyhunt/restverify/blob/main/docs/RELEASE.md) | how releases are cut and signed |
+| [`docs/RELEASE-VALIDATION-0.2.1.md`](https://github.com/niffyhunt/restverify/blob/main/docs/RELEASE-VALIDATION-0.2.1.md) | upgrade drill, exit-code matrix, release digests |
+| [`docs/I9-DRILL.md`](https://github.com/niffyhunt/restverify/blob/main/docs/I9-DRILL.md) | the 1 GiB / 1253-file scale drill |
+| [`docs/I10-CI.md`](https://github.com/niffyhunt/restverify/blob/main/docs/I10-CI.md) | the CI drill, rehearsed |
+| [`docs/I11-SANDBOX.md`](https://github.com/niffyhunt/restverify/blob/main/docs/I11-SANDBOX.md) | the sandbox gate |
 
 ## Status
 

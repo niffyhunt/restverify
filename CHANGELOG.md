@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.3.1] — documentation links + packaging polish — 2026-09-30
+
+Same verified code as 0.3.0 (443 tests, no behavior changes) with the
+documentation surface fixed:
+
+### Fixed
+- **README documentation links now resolve everywhere.** The doc links were
+  relative, which works on GitHub but 404s on PyPI (PyPI renders only the
+  README, it cannot host repo files). All of them now point at the public
+  repository: https://github.com/niffyhunt/restverify
+- **Platform note rewritten.** Windows: the full test suite and the run
+  pipeline work natively with real `restic.exe` and Windows-cut release
+  artefacts; `--sandbox` is the one Linux-only feature. Stated plainly,
+  no hedging.
+
+### Changed
+- The restore-drill action's artefact download URL defaults to the public
+  repository (https://github.com/niffyhunt/restverify/releases/download).
+
 ## [0.3.0] — the proof-and-visibility release — 2026-09-30
 
 Three increments from the operator-approved spec, on one train. Spec ids

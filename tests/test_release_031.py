@@ -47,8 +47,22 @@ def test_run_json_envelope_keys_stable_across_the_version_bump(
     assert payload["version"] == __version__
 
 
-def test_version_is_030():
-    assert __version__ == "0.3.0"
+def test_version_is_current_release():
+    assert __version__ == "0.3.1"
+
+
+def test_readme_links_resolve_on_pypi():
+    """0.3.1: every doc link in the README is an absolute GitHub URL, because
+    PyPI renders only the README and cannot host repo files (relative links
+    404ed there in 0.3.0)."""
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+        encoding="utf-8")
+    for name in ("CHANGELOG.md", "docs/SECURITY.md", "docs/RELEASE.md",
+                 "docs/I9-DRILL.md", "docs/I10-CI.md", "docs/I11-SANDBOX.md",
+                 "docs/RELEASE-VALIDATION-0.3.0.md", "docs/release-key.asc"):
+        assert f"https://github.com/niffyhunt/restverify/blob/main/{name}" in \
+            text, f"README link for {name} must be absolute"
 
 
 def test_zero_runtime_dependencies_hold():
