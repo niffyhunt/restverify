@@ -473,7 +473,7 @@ def _pending(cmd: str, increment: str) -> int:
     here, never as a fake surface."""
     print(f"{PROG}: '{cmd}' is not implemented yet in this build.\n"
           f"  why:   scaffold builds the CLI surface and contract first\n"
-          f"  next:  implemented in increment {increment}; see docs/PHASE2-PLAN.md",
+          f"  next:  implemented in increment {increment}",
           file=sys.stderr)
     return EXIT_RESTORE_FAIL
 

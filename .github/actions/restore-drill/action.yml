@@ -49,7 +49,7 @@ inputs:
       fetched from. Override to drill from a pre-release location
       (e.g. a job artefact server) without changing anything else.
     required: true
-    default: 'https://github.com/wraithwall/restverify/releases/download'
+    default: 'https://github.com/niffyhunt/restverify/releases/download'  # override base_url only if your release lives elsewhere
   release_key:
     description: >
       Path to the armored public key the wheel is verified against.

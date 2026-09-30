@@ -9,13 +9,13 @@ restic matches a pattern against the path it is filtering, then retries with one
 leading path component stripped at a time - so a pattern may be written relative
 to the backup root, relative to any ancestor of it, or absolute - and its globs
 are Go's `filepath.Match`: `*` and `?` do not cross `/`, `**` does, and `**/`
-also matches zero segments. Measured on a source at /root/i7-scratch/srcB
+also matches zero segments. Measured on a source at <scratch-root>/i7-scratch/srcB
 holding app.log, cache/blob.bin, data/keep.txt and nested/trace.log:
 
     *.log                        -> app.log, nested/trace.log
     data/*.txt                   -> data/keep.txt
     srcB/data/*.txt              -> data/keep.txt   (root-prefixed: matched)
-    /root/i7-scratch/srcB/...    -> data/keep.txt   (absolute: matched)
+    <scratch-root>/i7-scratch/srcB/...    -> data/keep.txt   (absolute: matched)
     keep.txt                     -> data/keep.txt
     cache/ , cache , *cache*     -> the cache subtree
     srcB/data*keep.txt           -> nothing         (* does not cross /)

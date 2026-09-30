@@ -38,7 +38,7 @@ Command: `.venv/bin/python scripts/security_sweep.py` (exit code 0)
 
 ```
 restverify V2 security sweep (I6b)
-  root            /home/deploy/oss/restverify/src/restverify
+  root            <repo-root>/src/restverify
   modules         11
   python          3.11.15
   third-party     0
@@ -188,7 +188,7 @@ an exit code — 260 → 267 tests are tests-only changes plus the sweep script.
 
 - **B1 CLOSED at I7a** — a real `restic` 0.16.4 (Ubuntu package
   `0.16.4-2ubuntu0.24.04.3`, go1.22.2) was installed on the operator-ruled I7 host
-  `vmi3416386` and exercised against two real repositories, eight commands, exit
+  `second-build-host` and exercised against two real repositories, eight commands, exit
   codes 0/0/0/0/2/0/1/1 as specified. Three fake-vs-real assumptions were wrong
   and corrected in I7b (hint selection, the fake's exit codes, the exclude
   matcher); the full transcript is in `restverify-I7-briefing.md` §4–5.

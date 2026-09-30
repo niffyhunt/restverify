@@ -14,7 +14,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 REPORT = REPO / "docs" / "SECURITY.md"
-PLAN = REPO / "docs" / "PHASE2-PLAN.md"
+# The internal planning doc was removed from the public repo (sanitization,
+# 2026-09-30); the host-audit assertion it carried is retired with it.
+PLAN = None
 
 
 def _report() -> str:
@@ -28,7 +30,8 @@ def test_b1_is_no_longer_reported_as_open():
     assert "B1 open" not in text, "B1 is closed by I7a; the report must not still say open"
     assert "B1 CLOSED" in text
     assert "0.16.4" in text, "the report must name the restic version that was exercised"
-    assert "vmi3416386" in text, "the report must name the host I7 ran on"
+    assert "build-host" in text or "second-build-host" in text, \
+        "the report must name the build host (sanitized) that I7 ran on"
 
 
 def test_u7_is_recorded_as_measured_with_its_target():
@@ -47,10 +50,9 @@ def test_the_other_blockers_are_still_named():
 
 
 def test_plan_records_that_i7_ran_on_the_second_host():
-    """The environment audit still describes the primary box; I7's host is noted."""
-    text = PLAN.read_text(encoding="utf-8")
-    assert "vmi3416386" in text
-    assert "restic 0.16.4" in text
+    """Retired with the internal planning doc (sanitization, 2026-09-30):
+    the audit table lived there, not in the public docs."""
+    assert PLAN is None
 
 
 def test_i7_tests_contain_no_clock_or_sleep():

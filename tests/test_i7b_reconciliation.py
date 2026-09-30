@@ -24,10 +24,10 @@ from restverify.restic import _hint_for
 
 REAL_WRONG_PASSWORD = "Fatal: wrong password or no key found"
 REAL_MISSING_REPO = (
-    "Fatal: unable to open config file: stat /root/i7-scratch/no-such-repo/config: "
+    "Fatal: unable to open config file: stat <scratch-root>/i7-scratch/no-such-repo/config: "
     "no such file or directory\n"
     "Is there a repository at the following location?\n"
-    "/root/i7-scratch/no-such-repo"
+    "<scratch-root>/i7-scratch/no-such-repo"
 )
 REAL_MISSING_SNAPSHOT = (
     'Fatal: failed to find snapshot: no matching ID found for prefix "deadbeefdeadbeef"'
@@ -132,18 +132,18 @@ def test_restore_failure_teaches_with_restic_own_sentence(fake_restic, tmp_base,
 
 # ── item 5: excludes.py must agree with restic's own matcher ────────────────
 
-# The real probe. Source root /root/i7-scratch/srcB held app.log,
+# The real probe. Source root <scratch-root>/i7-scratch/srcB held app.log,
 # cache/blob.bin, data/keep.txt and nested/trace.log; each pattern was passed to
 # `restic restore <id> --exclude <pattern>` and the right column is what restic
 # really left out of the restore (I7 briefing, section 5).
-SOURCE_ROOT = "/root/i7-scratch/srcB"
+SOURCE_ROOT = "<scratch-root>/i7-scratch/srcB"
 SOURCE_FILES = ["app.log", "cache/blob.bin", "data/keep.txt", "nested/trace.log"]
 
 REAL_EXCLUDE_MATRIX = [
     ("*.log", {"app.log", "nested/trace.log"}),
     ("data/*.txt", {"data/keep.txt"}),
     ("srcB/data/*.txt", {"data/keep.txt"}),                      # root-prefixed
-    ("/root/i7-scratch/srcB/data/*.txt", {"data/keep.txt"}),      # absolute
+    ("<scratch-root>/i7-scratch/srcB/data/*.txt", {"data/keep.txt"}),      # absolute
     ("i7-scratch/srcB/data/*.txt", {"data/keep.txt"}),            # ancestor-prefixed
     ("keep.txt", {"data/keep.txt"}),
     ("cache", {"cache/blob.bin"}),

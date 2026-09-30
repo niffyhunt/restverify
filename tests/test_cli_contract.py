@@ -89,4 +89,3 @@ def test_pending_table_is_empty_and_helper_still_teaches(capsys):
     assert code != EXIT_PASS
     assert "not implemented" in err
     assert "I9" in err
-    assert "docs/PHASE2-PLAN.md" in err

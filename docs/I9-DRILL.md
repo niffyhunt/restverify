@@ -1,6 +1,6 @@
 # I9 drill — restore verification at scale (transcript + evidence)
 
-Executed 2026-09-29 on host `vmi3403127` (this box), restic 0.16.4
+Executed 2026-09-29 on host `build-host` (this box), restic 0.16.4
 (`0.16.4-2ubuntu0.24.04.3`, go1.22.2 — same package the I7 host validated).
 This is the gate evidence for I9 of the V2 train
 (`docs/V2-BUILD-PLAN.md`): one drill on a ≥1 GB / ≥1000-file repo, non-root

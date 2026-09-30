@@ -1,6 +1,6 @@
 # Release validation — restverify 0.3.0
 
-Build host: `vmi3403127` (Linux, CPython 3.11.15, LF line endings), 2026-09-30.
+Build host: `build-host` (Linux, CPython 3.11.15, LF line endings), 2026-09-30.
 Suite at release commit `b76dc7b` (I15 included): **443 passed,
 2 skipped** (skips = the two real-restic integration tests, opt-in via
 `RESTVERIFY_PROVE_REAL=1`; both pass when enabled — verified against a real

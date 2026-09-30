@@ -408,7 +408,7 @@ def test_prove_webhook_error_path_delivers(fake_restic, tmp_base, capsys, monkey
 
 REAL = os.environ.get("RESTVERIFY_PROVE_REAL") == "1" and shutil.which("restic")
 REAL_REPO = "/tmp/probe-repo"
-REAL_PASSWORD = "echo probe123"
+REAL_PASSWORD = "echo drill-pass"   # throwaway local probe repo, sanitized
 pytestmark_real = pytest.mark.skipif(
     not REAL, reason="real-restic probe not requested "
                      "(set RESTVERIFY_PROVE_REAL=1 with /tmp/probe-repo present)")

@@ -1,6 +1,6 @@
 # 0.2.1 release validation — upgrade from the published first release
 
-Executed 2026-09-29 on host `vmi3403127`. This is the final overall test
+Executed 2026-09-29 on host `build-host`. This is the final overall test
 before staging 0.2.1: prove that an operator who installed the **published
 0.1.0 from PyPI** can upgrade in place and nothing they rely on breaks —
 same config, same history, same exit codes, same demo line — and that the
@@ -95,7 +95,7 @@ zero orphans
   <contact@wraithwall.online>" [ultimate]`.
 - Artefact signatures round-trip clean with the release key.
 
-Recorded sha256 (build host `vmi3403127`, Linux, CPython 3.11.15, LF — the
+Recorded sha256 (build host `build-host`, Linux, CPython 3.11.15, LF — the
 Linux-leg evidence):
 
 ```

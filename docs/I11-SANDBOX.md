@@ -1,6 +1,6 @@
 # I11 — `run --sandbox` (R45): what shipped + the gate drill transcript
 
-Executed 2026-09-29 on host `vmi3403127`, real restic 0.16.4 and real Docker
+Executed 2026-09-29 on host `build-host`, real restic 0.16.4 and real Docker
 29.1.3. This is the fourth and last increment of the V2 train
 (`docs/V2-BUILD-PLAN.md`): the restore can now run inside a disposable
 container, per the operator's Plan 1 (docs/V2-PLAN-ADDENDUM.md, Upgrade 4).

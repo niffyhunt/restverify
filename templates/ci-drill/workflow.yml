@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Restore-drill (happy fixture proof + your repository)
-        uses: wraithwall/restverify/.github/actions/restore-drill@v0.2.1
+        uses: niffyhunt/restverify/.github/actions/restore-drill@v0.3.0  # override only if you fork elsewhere
         with:
           version: '0.2.1'
           # base_url: override if your release lives elsewhere

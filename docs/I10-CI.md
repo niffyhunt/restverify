@@ -1,6 +1,6 @@
 # I10 — CI restore-drill (R44): what shipped + local rehearsal transcript
 
-Executed 2026-09-29 on host `vmi3403127`, real restic 0.16.4
+Executed 2026-09-29 on host `build-host`, real restic 0.16.4
 (`0.16.4-2ubuntu0.24.04.3`, go1.22.2 — same package the I7 host and the I9
 drill used). This is the I10 increment record of the V2 train
 (`docs/V2-BUILD-PLAN.md` §2–§3): the reusable composite restore-drill GitHub

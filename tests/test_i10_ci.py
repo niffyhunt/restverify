@@ -261,7 +261,7 @@ def test_selftest_workflow_runs_the_shipped_action_under_the_gate_bounds():
 
 def test_template_workflow_pins_a_tag_and_schedules_the_drill():
     text = _template()
-    match = re.search(r"uses: wraithwall/restverify/.github/actions/restore-drill@(\S+)",
+    match = re.search(r"uses: niffyhunt/restverify/\.github/actions/restore-drill@(\S+)",
                       text)
     assert match, "the template must pin the shipped action"
     assert re.fullmatch(r"v\d+\.\d+\.\d+", match.group(1)), \
