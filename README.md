@@ -37,7 +37,7 @@ someone comments out the cron line — and the first time it really runs is the
 day you need the backup.
 
 restverify is that script, done properly: one command, a recorded history,
-a machine-readable JSON envelope, and a 347-test suite that is verified
+a machine-readable JSON envelope, and a 442-test suite that is verified
 against real `restic` repositories — including a 1.02 GiB / 1253-file drill
 over an SFTP backend run as an unprivileged user
 ([transcript](docs/I9-DRILL.md)).
@@ -260,20 +260,22 @@ Every release is signed; verification needs no keyserver:
 
 ```bash
 # verify the tag
-git tag -v v0.2.1
+git tag -v v0.3.0
 
 # verify a wheel/sdist from PyPI against the in-repo release key
-curl -O https://files.pythonhosted.org/packages/<path>/restverify-0.2.1-py3-none-any.whl
-curl -O https://files.pythonhosted.org/packages/<path>/restverify-0.2.1-py3-none-any.whl.asc
+curl -O https://files.pythonhosted.org/packages/<path>/restverify-0.3.0-py3-none-any.whl
+curl -O https://files.pythonhosted.org/packages/<path>/restverify-0.3.0-py3-none-any.whl.asc
 gpg --import docs/release-key.asc
-gpg --verify restverify-0.2.1-py3-none-any.whl.asc restverify-0.2.1-py3-none-any.whl
+gpg --verify restverify-0.3.0-py3-none-any.whl.asc restverify-0.3.0-py3-none-any.whl
 ```
 
 Release key: RSA3072, fingerprint
 `C5F735E977D4D45C1663AA40E4CE56B6CEF87373`, identity *restverify release
 signing*; the armored public key ships at
 [`docs/release-key.asc`](docs/release-key.asc). Recorded sha256 digests for
-the current release and the full upgrade-drill transcript are in
+the current release and its validation transcript are in
+[`docs/RELEASE-VALIDATION-0.3.0.md`](docs/RELEASE-VALIDATION-0.3.0.md); the
+0.2.1 upgrade drill (exit-code matrix, artefact digests) remains at
 [`docs/RELEASE-VALIDATION-0.2.1.md`](docs/RELEASE-VALIDATION-0.2.1.md).
 
 ## History and trends
@@ -342,5 +344,9 @@ still win.
 
 ## Status
 
-v0.2.1 is live on [PyPI](https://pypi.org/project/restverify/). Known open
-item: `init --json` is not implemented yet.
+v0.3.0 is the current release — live on
+[PyPI](https://pypi.org/project/restverify/). It adds `prove` (source-less
+snapshot verification with a cryptographic seal check), `dashboard` (the
+local read-only history page), and `run --report-webhook` (deliver the
+verdict to a collector). Known open item: `init --json` is not implemented
+yet.
