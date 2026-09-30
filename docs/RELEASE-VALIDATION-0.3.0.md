@@ -1,7 +1,7 @@
 # Release validation — restverify 0.3.0
 
 Build host: `vmi3403127` (Linux, CPython 3.11.15, LF line endings), 2026-09-30.
-Suite at release commit `a57626b` + README/validation fixups: **442 passed,
+Suite at release commit `b76dc7b` (I15 included): **443 passed,
 2 skipped** (skips = the two real-restic integration tests, opt-in via
 `RESTVERIFY_PROVE_REAL=1`; both pass when enabled — verified against a real
 restic 0.16.4 probe repository).
@@ -15,6 +15,8 @@ restic 0.16.4 probe repository).
 | `860b8a1` | I13a — prove content check (`restic check --read-data-subset`) |
 | `3226e67` | I14 (R49) — `dashboard` |
 | `a57626b` | release prep 0.3.0 (README/CHANGELOG/version) |
+| `551e142` | product-voice pass (no behavior change) |
+| `b76dc7b` | I15 (R50) — `init --json`, the last JSON surface |
 
 Tag `v0.3.0` is signed (`git tag -s`); `git tag -v v0.3.0` output:
 
@@ -31,8 +33,8 @@ no `tests/`, no `__pycache__`, no `history.db`. Sdist is allowlist-based.
 
 | Artefact | sha256 |
 |----------|--------|
-| `restverify-0.3.0-py3-none-any.whl` | `5551d58a14d4cb14327a77323d84f38769f6fb6b5d3a80883f2c85031889783c` |
-| `restverify-0.3.0.tar.gz` | `36f8ccb13eba3db17fde68409bf621e40135b009832ba17149bbd477e24d0bb5` |
+| `restverify-0.3.0-py3-none-any.whl` | `833e1e598f3a0365e11a437ba2e788f6886b037773f65e4a1d90b7ca0b596a3b` |
+| `restverify-0.3.0.tar.gz` | `521d99616ece79940d7621c2aa32e4838f6740a1b31b4f5160e16602c11e137b` |
 
 Both are GPG-detach-signed (`.asc` next to the artefacts); round-trip
 `gpg --verify` passed for both. NOTE: the README fixups in this commit

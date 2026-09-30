@@ -22,6 +22,7 @@ import os
 import pytest
 
 from restverify import EXIT_DIFF_MISMATCH, EXIT_PASS, EXIT_RESTORE_FAIL, EXIT_USAGE
+from restverify import SCHEMA_VERSION
 from restverify.cli import main
 from restverify.errors import ERROR_KINDS
 
@@ -193,10 +194,34 @@ def test_human_usage_error_is_unchanged(capsys):
     assert "error:" in captured.err and "next:" in captured.err
 
 
-def test_init_json_stays_deferred(config_path, capsys):
-    """Ruling 4: no speculative schema for init/report/cron at I3."""
+def test_init_json_is_a_real_surface(config_path, capsys):
+    """Ruling 4 said no speculative schema at I3; I15 (R50) ships init's real
+    one: schema 1, status "init", stdout pure, teaching notes carried."""
     code = main(["init", "-r", "/srv/backup", "--json"])
     captured = capsys.readouterr()
     assert code == EXIT_PASS
-    assert "not implemented for this command yet" in captured.err
-    assert captured.out.lstrip().startswith("\u2713")
+    payload = json.loads(captured.out)
+    assert payload["command"] == "init" and payload["status"] == "init"
+    assert payload["schema"] == SCHEMA_VERSION
+    assert payload["init"]["verb"] == "added"
+    assert payload["init"]["repo"] == "/srv/backup"
+    assert payload["init"]["name"] == "backup"
+    assert payload["init"]["password_command_saved"] is False
+    assert any("source" in n for n in payload["init"]["notes"])
+    assert any("password_command" in n for n in payload["init"]["notes"])
+    assert "not implemented" not in captured.err
+    # No secret material in the envelope — only the boolean and the flag name.
+    assert "hunter2" not in captured.out
+
+
+def test_init_json_update_verb_and_source_note(config_path, capsys):
+    main(["init", "-r", "/srv/backup", "-s", "/srv/data",
+          "--password-command", "pass show restic/srv", "--json"])
+    capsys.readouterr()                      # drop the first envelope
+    code = main(["init", "-r", "/srv/backup", "-s", "/srv/data",
+                 "--password-command", "pass show restic/srv", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == EXIT_PASS
+    assert payload["init"]["verb"] == "updated"
+    assert payload["init"]["password_command_saved"] is True
+    assert payload["init"]["notes"] == []     # nothing missing, nothing to teach

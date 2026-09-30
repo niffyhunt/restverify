@@ -156,7 +156,14 @@ def build_parser() -> argparse.ArgumentParser:
                     "terminal attached, restverify asks for it.",
         epilog="examples:\n  restverify init -r /srv/backup\n"
                "  restverify init -r /srv/backup -s /srv/data -x '*.log' -x cache/\n"
-               "  restverify init -r b2:bucket:path --password-command 'pass show restic/srv'",
+               "  restverify init -r b2:bucket:path --password-command 'pass show restic/srv'\n"
+               "\njson envelope (--json):\n"
+               "  one object on stdout, schema 1, command \"init\", status \"init\";\n"
+               "  init.init carries verb (added/updated), the saved entry (repo,\n"
+               "  name, source, excludes, snapshot) and password_command_saved as a\n"
+               "  boolean — the password itself is never stored or echoed. notes\n"
+               "  mirrors the human teaching lines; interactive prompting is\n"
+               "  skipped under --json, so scripts always get one parseable object.\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_init.add_argument("-r", "--repo", metavar="PATH", help="restic repository location")
     p_init.add_argument("-s", "--source", metavar="PATH",
@@ -431,17 +438,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _note_json_deferred(args) -> None:
-    """G6: `init`'s --json is still deferred and must not fake a schema.
-
-    `run` (I3), `report` (I4b) and `cron` (I5a) are real JSON surfaces; `init`
-    arrives in its own increment.
-    """
-    if getattr(args, "json", False):
-        print(f"{PROG}: --json is not implemented for this command yet; "
-              "showing the human-readable output instead.", file=sys.stderr)
-
-
 def _record_error_run(args, kind: str, code: int, started: float) -> None:
     """A failed `run` still trends (every run writes a row, including failures).
 
@@ -473,6 +469,8 @@ def _record_error_run(args, kind: str, code: int, started: float) -> None:
 
 
 def _pending(cmd: str, increment: str) -> int:
+    """Kept for future increments: a scaffolded-but-unbuilt command lands
+    here, never as a fake surface."""
     print(f"{PROG}: '{cmd}' is not implemented yet in this build.\n"
           f"  why:   scaffold builds the CLI surface and contract first\n"
           f"  next:  implemented in increment {increment}; see docs/PHASE2-PLAN.md",
@@ -482,8 +480,45 @@ def _pending(cmd: str, increment: str) -> int:
 
 # ── init ────────────────────────────────────────────────────────────────────
 
+def _init_notes(entry, path, verb) -> list[str]:
+    """The teaching lines init prints in human mode; carried in init.notes
+    for --json so stdout stays a single valid object."""
+    notes: list[str] = []
+    if not entry.source:
+        notes.append("no source path yet, so `run` will verify the restore "
+                     "completes without comparing files; add one with "
+                     "`restverify init -r <repo> -s <source>`")
+    if not entry.password_command:
+        notes.append("no password_command saved; set RESTIC_PASSWORD_COMMAND or "
+                     "re-run init with --password-command")
+    return notes
+
+
+def _init_payload(entry, path, verb) -> dict:
+    """The init envelope (I15, R50): schema 1, status "init"; init.init
+    carries what happened, and notes mirrors the human teaching lines."""
+    return {
+        "tool": PROG,
+        "schema": SCHEMA_VERSION,
+        "version": __version__,
+        "command": "init",
+        "status": "init",
+        "exit_code": EXIT_PASS,
+        "init": {
+            "repo": entry.repo,
+            "name": entry.name,
+            "verb": verb,                       # added | updated
+            "config": str(path),
+            "source": entry.source,
+            "excludes": list(entry.excludes),
+            "snapshot": entry.snapshot,
+            "password_command_saved": bool(entry.password_command),
+            "notes": _init_notes(entry, path, verb),
+        },
+    }
+
+
 def _cmd_init(args) -> int:
-    _note_json_deferred(args)
     repo = args.repo
     if not repo and sys.stdin.isatty():
         try:
@@ -516,13 +551,13 @@ def _cmd_init(args) -> int:
         verb = "added"
     path = cfgmod.save_config(config, args.config)
 
+    if _JSON_MODE:
+        _emit_json(_init_payload(entry, path, verb))
+        return EXIT_PASS
+
     print(f"✓ {verb} '{entry.name}' in {path}")
-    if not entry.source:
-        print("  note: no source path yet, so `run` will verify the restore completes "
-              "without comparing files\n        add one with `restverify init -r <repo> -s <source>`")
-    if not entry.password_command:
-        print("  note: no password_command saved; set RESTIC_PASSWORD_COMMAND or "
-              "re-run init with --password-command")
+    for note in _init_notes(entry, path, verb):
+        print(f"  note: {note}")
     print(f"\nnext: restverify run -r {entry.name}")
     print(f"      restverify cron -r {entry.name}"
           "   # prints a crontab line for a scheduled check (it installs nothing)")
@@ -1307,8 +1342,8 @@ def _cmd_dashboard(args) -> int:
 
 _DISPATCH = {"init": _cmd_init, "run": _cmd_run, "prove": _cmd_prove,
              "report": _cmd_report, "cron": _cmd_cron, "dashboard": _cmd_dashboard}
-# Empty since I5a: `cron` was the last pending command, so every command in the
-# parser is now real (gate G6). The helper below stays for the next increment.
+# Empty since I15: every command in the parser is real and every command
+# speaks --json with the same schema-1 envelope (gate G6, now fully closed).
 _PENDING: dict[str, str] = {}
 
 

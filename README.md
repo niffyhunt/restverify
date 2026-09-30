@@ -348,5 +348,5 @@ v0.3.0 is the current release — live on
 [PyPI](https://pypi.org/project/restverify/). It adds `prove` (source-less
 snapshot verification with a cryptographic seal check), `dashboard` (the
 local read-only history page), and `run --report-webhook` (deliver the
-verdict to a collector). Known open item: `init --json` is not implemented
-yet.
+verdict to a collector). Every command speaks `--json` with the same
+schema-1 envelope.

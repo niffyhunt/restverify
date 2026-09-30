@@ -52,6 +52,14 @@ scale drill, CI action, sandbox), so this train continues at I12–I14
   never logged; Ctrl-C exits 0. dashboard.py is the ONE listener module —
   the N4 boundary tests carry an explicit, documented carve-out.
 
+### Added — I15: `init --json` (R50) — the last JSON surface, shipped
+- `init` now emits the same schema-1 envelope as every other command:
+  status `init`, `init.verb` (added/updated), the saved entry (repo, name,
+  source, excludes, snapshot), `password_command_saved` as a boolean (the
+  password itself is never stored or echoed), and `notes` mirroring the
+  human teaching lines. Interactive prompting is skipped under `--json`, so
+  scripts always get one parseable object and never a stdin read.
+
 ### Fixed
 - `restic restore --include` escaping order is load-bearing (measured on
   0.16.4): double literal backslashes FIRST, then glob-escape — the other
@@ -100,7 +108,7 @@ so rather than hiding it.
   I10 (CI action, R44) ✓, I11 (sandbox, R45) ✓. Phase 2's increment train is
   fully built; ids R43–R46 shipped, R47+ free.
 - **C1 unchanged** — TOML config via `tomllib`; `dependencies = []` asserted.
-- **`init --json` deferred** (the last open rider).
+- **`init --json` shipped** in this same release (I15 below) — no rider.
 - **R44 hosted nightly leg** still pending operator hosting.
 
 ### What changed for users
@@ -212,7 +220,6 @@ Train I8→I10 of docs/V2-BUILD-PLAN.md (approved); I11 (R45 sandbox) rides
   via the sdist allowlist.
 
 ### Still open
-- `init --json` is deferred.
 - C1 (PyYAML ruling) remains open.
 - `run --sandbox` (R45, increment I11) rides the 0.2.1 train — it does not
   gate this release.
@@ -279,7 +286,6 @@ Train I8→I10 of docs/V2-BUILD-PLAN.md (approved); I11 (R45 sandbox) rides
   private temp dirs and your password is never stored.
 
 ### Still open
-- `init --json` is deferred.
 - C1 (PyYAML ruling) remains open.
 - R28: no signed tag yet (see Standing statuses above).
 - Verify with a repo you can afford to rehearse on.

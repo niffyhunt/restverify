@@ -122,7 +122,8 @@ step 7 authenticate the bytes — the release needs both.
 ## After the release
 
 Re-open the loop on the open items — C1 (PyYAML
-ruling) and `init --json` (the last G6 label). B1 closed at I7a and U7 was
+ruling) is the last one; `init --json` closed at I15 (0.3.0). B1 closed at
+I7a and U7 was
 measured at I7c (8.22 s); a release note that re-lists closed blockers is as
 wrong as one that hides open ones. A release that hides those is worse than a
 release note that names them.
