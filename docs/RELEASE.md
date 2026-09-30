@@ -35,7 +35,7 @@ Add the entry to the release notes with three headings, always in this shape:
 
 - what shipped (requirement ids),
 - what changed in behaviour a user will notice,
-- what is still open (B1/C1/U7 style honest limits).
+- what is still open (deferred items, named plainly).
 
 ## 3. Build
 
@@ -121,7 +121,7 @@ step 7 authenticate the bytes — the release needs both.
 
 ## After the release
 
-Re-open the loop on the honest limits that are still open — C1 (PyYAML
+Re-open the loop on the open items — C1 (PyYAML
 ruling) and `init --json` (the last G6 label). B1 closed at I7a and U7 was
 measured at I7c (8.22 s); a release note that re-lists closed blockers is as
 wrong as one that hides open ones. A release that hides those is worse than a

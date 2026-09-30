@@ -10,7 +10,8 @@ Security posture (each item is pinned by a test):
     socket exists) unless paired with `--yes-i-know`;
   * the Host header must name the bound address (or localhost) — a DNS
     rebinding page cannot aim a browser at this server; with `--bind-all`
-    the check is skipped because the operator explicitly widened it;
+    the check is skipped because binding to all interfaces was chosen
+    deliberately, which changes who can reach the page;
   * every value from the database is html.escape()d on render, so a repo
     named `<script>alert(1)</script>` renders as text;
   * responses carry `Content-Security-Policy: default-src 'none'; style-src
@@ -167,7 +168,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # Filled by make_server: the bound host, the store path, and whether the
-    # operator widened the bind (which also widens the Host check).
+    # bind covers all interfaces (which also widens the Host check).
     db_path = None
     bound_host = "127.0.0.1"
     allow_any_host = False

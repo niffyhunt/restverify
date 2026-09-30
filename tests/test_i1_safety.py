@@ -1,6 +1,6 @@
 """Increment I1 security + scope attestation (gate G3, R23/R24/R25, N1/N2/N6).
 
-These tests are the machine-checkable half of the honesty claim: they assert
+These tests are the machine-checkable half of the scope claims: they assert
 what restverify *cannot* do, not just what it does.
 """
 import re

@@ -14,7 +14,7 @@ Behavior contract:
   ``http://`` URL never reaches the network at all.
 * Redirects are refused: the opener's redirect handler declines, so a 3xx
   arrives as a non-2xx outcome and is reported as a failure — the envelope is
-  for the operator's receiver, not for somebody else's.
+  for your receiver, not for somebody else's.
 * Credentials from URL userinfo are stripped from the request URL before
   sending and never appear in any message.
 * The user agent is ``restverify/<version>`` from the package's single version
@@ -23,8 +23,7 @@ Behavior contract:
   never the query string, never the fragment, never userinfo.
 
 Timeouts: one finite ``float``, ``0 < t <= 60`` seconds (parse-time checked).
-There is deliberately no retry: the webhook mirrors the run's honesty — one
-attempt, one line of truth.
+There is deliberately no retry: one attempt, one line of truth.
 """
 from __future__ import annotations
 
@@ -127,7 +126,7 @@ def redact(url: str) -> str:
 def envelope_bytes(payload: dict) -> bytes:
     """The exact bytes of the ``--json`` envelope: the same serialization the
     CLI prints (indent 2, non-ASCII kept, one trailing newline), so what the
-    receiver stores is byte-for-byte what the operator saw."""
+    receiver stores is byte-for-byte what stdout printed."""
     return (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 

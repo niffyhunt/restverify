@@ -66,7 +66,7 @@ class Entry:
     kind: str
     size: int                  # regular-file bytes; 0 for links and other
     link_target: str | None = None
-    mode: int | None = None    # R46: st_mode & 0o7777; None keeps old manifests honest
+    mode: int | None = None    # R46: st_mode & 0o7777; None keeps old manifests comparable
     uid: int | None = None     # R46: owner uid (best-effort; same rules as mode)
 
     def to_json(self) -> dict:

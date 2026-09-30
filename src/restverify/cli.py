@@ -661,8 +661,8 @@ def _write_history(record: "historymod.RunRecord") -> dict:
     """Best-effort history write (I4 ruling 2).
 
     A store failure never changes the verification's exit code: it warns with a
-    teaching line on stderr and is reported honestly in the JSON block. The
-    caller decides whether a row is written at all (cli decides; history.py does
+    teaching line on stderr and is reported in the JSON block. The caller
+    decides whether a row is written at all (cli decides; history.py does
     not) — the same boundary as `--dry-run` and restic.
 
     Retention (I4c): when the write prunes rows for a repository, it is
@@ -714,7 +714,7 @@ def _deliver_webhook(args, entry, payload: dict) -> None:
 
     Ordering rule: this runs AFTER the history write and AFTER the envelope is
     fully built, BEFORE the process exits — the receiver sees exactly the same
-    JSON the operator would have seen on stdout. A delivery failure is one
+    JSON that stdout printed. A delivery failure is one
     stderr line; it NEVER changes the exit code and NEVER reaches stdout.
     Errors here are swallowed by deliver()'s contract; the extra except is a
     belt-and-braces guard so a bug can never turn into a traceback after a
@@ -929,14 +929,13 @@ def _cmd_prove(args) -> int:
                                               snapshot_paths=snapshot.paths)
             cleaned = tempstore.cleanup(target)
 
-    # Content integrity (I13 follow-up, operator ruling: "why can't honest
-    # scope be fixed"): ls --json has no per-file hashes, but the repository
-    # SEALS its data. `restic check --read-data-subset N%` reads the same
-    # share of packs and verifies the seal — catching corruptions the size
-    # check alone cannot see (measured: restore exits 0 on a flipped byte,
-    # check does not). Same percent as the sample; --sample 100 = full
-    # --read-data. A failed check is a DATA verdict (exit 2), not a
-    # could-not-complete: the check ran and the data did not verify.
+    # Content integrity: `restic ls --json` has no per-file hashes, but the
+    # repository SEALS its data. `restic check --read-data-subset N%` reads
+    # the same share of packs and verifies the seal — catching corruptions
+    # the size check alone cannot see (measured: restore exits 0 on a
+    # flipped byte, check does not). Same percent as the sample; --sample
+    # 100 = full --read-data. A failed check is a DATA verdict (exit 2),
+    # not could-not-complete: the check ran and the data did not verify.
     check_ok, check_line = True, "skipped (nothing sampled)"
     if sample:
         check_ok, check_line = resticmod.check_data_subset(repo, percent,
@@ -1116,7 +1115,7 @@ def _cmd_report(args) -> int:
 # ── cron (I5a) ──────────────────────────────────────────────────────────────
 #
 # Doctrine for this command: it PRINTS, it never installs. It renders text for
-# the operator to paste; it must not touch a crontab, call systemctl, or write
+# the user to paste; it must not touch a crontab, call systemctl, or write
 # into any unit directory. The tests assert exactly that, and the I5 security
 # self-check greps this module for the calls that would break it.
 
@@ -1163,7 +1162,7 @@ def _cron_line(binary: str, repo: str) -> str:
 
     `--json` is deliberately NOT appended here even when the caller asked for the
     JSON envelope: output format must not change what the scheduled job does
-    (I3 ruling 2). The help text documents that an operator who wants
+    (I3 ruling 2). The help text documents that a user who wants
     machine-readable cron logs appends `--json` to the `run` command themselves.
     """
     return f"{EXAMPLE_SCHEDULE} {binary} run -r {repo}"
@@ -1248,7 +1247,7 @@ def _cron_payload(binary: str, repo: str, resolved: bool,
 
 
 def _cmd_cron(args) -> int:
-    """R15: render a schedule for the operator to install themselves."""
+    """R15: render a schedule for the user to install themselves."""
     binary = _cron_binary()
     repo, resolved = _cron_repo(args)
     systemd = bool(getattr(args, "systemd", False))

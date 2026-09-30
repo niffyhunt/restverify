@@ -28,18 +28,18 @@ scale drill, CI action, sandbox), so this train continues at I12–I14
   reproducible. Zero-runtime-dependency sampling: a counter-mode AES-256
   DRBG on the standard library only, pinned against FIPS-197 C.3 and NIST
   SP 800-38A F.5.5.
-- **Honest per-file scope, stated everywhere**: `restic ls --json` exposes
+- **Per-file scope, stated in the envelope**: `restic ls --json` exposes
   no content hashes (measured on 0.16.4), so `hashes_available` is `false`
   and the per-file claim is existence + size.
 
 ### Added — I13a: the prove content check (operator ruling)
-- During review the operator asked why "honest scope" could not be fixed.
-  It could: the repository format seals its data, and `restic check
-  --read-data-subset N%` (read-only, present in 0.16.4) verifies those
-  seals over the same share of packs as the file sample (`--sample 100` →
-  full `--read-data`). A failed seal is a data verdict (exit 2); a locked
-  repository is could-not-complete (exit 1) — never misreported as
-  corruption.
+- The 0.3.0 review asked why per-file verification was size-only. The
+  answer was fixable: the repository format seals its data, and `restic
+  check --read-data-subset N%` (read-only, present in 0.16.4) verifies
+  those seals over the same share of packs as the file sample
+  (`--sample 100` → full `--read-data`). A failed seal is a data verdict
+  (exit 2); a locked repository is could-not-complete (exit 1) — never
+  misreported as corruption.
 
 ### Added — I14: `dashboard` (R49) — the run history as a local page
 - One stdlib page, read-only end to end: newest 50 runs + a
@@ -90,7 +90,7 @@ so rather than hiding it.
   1). The Single Spawner rule holds — restic.py stays the only process-
   spawning module (`test_n5_only_restic_py_spawns_processes` green,
   unmodified).
-- Honest limits: one documented runtime (docker; group socket access, never
+- Documented runtime: one (docker; group socket access, never
   sudo); a `password_command` that reads a host file needs
   `RESTVERIFY_SANDBOX_PASSFILE` (mounted read-only) because the command runs
   in-container; Windows is out of scope — the drill runs natively there.
@@ -211,7 +211,7 @@ Train I8→I10 of docs/V2-BUILD-PLAN.md (approved); I11 (R45 sandbox) rides
 - Source distributions now ship the CI surface (`.github/`, `templates/`)
   via the sdist allowlist.
 
-### Still open (honest)
+### Still open
 - `init --json` is deferred.
 - C1 (PyYAML ruling) remains open.
 - `run --sandbox` (R45, increment I11) rides the 0.2.1 train — it does not
@@ -278,7 +278,7 @@ Train I8→I10 of docs/V2-BUILD-PLAN.md (approved); I11 (R45 sandbox) rides
 - Verification only: bring your own orchestration; restores always go to
   private temp dirs and your password is never stored.
 
-### Still open (honest)
+### Still open
 - `init --json` is deferred.
 - C1 (PyYAML ruling) remains open.
 - R28: no signed tag yet (see Standing statuses above).

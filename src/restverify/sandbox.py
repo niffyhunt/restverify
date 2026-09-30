@@ -1,8 +1,8 @@
 """`run --sandbox` — restore inside a disposable container (R45, I11).
 
-The operator's Plan 1 (docs/V2-PLAN-ADDENDUM.md, Upgrade 4): optionally, the
-restore runs inside an ephemeral container so the operator's host never
-touches restored attacker-influenceable data. The lifecycle is the brief's:
+Plan 1 (docs/V2-PLAN-ADDENDUM.md, Upgrade 4): optionally, the
+restore runs inside an ephemeral container so the host never
+touches restored attacker-influenceable data. The lifecycle is the plan's:
 create container -> mount the tempstore dir -> exec restore -> destroy
 container, with the purge enforced regardless of the verification's exit
 code — a clean exit, an exception, a SIGINT and even a `kill -9` mid-restore
@@ -15,7 +15,7 @@ How the isolation works (documented because it is a safety claim):
   (`--network none`); a **remote** repo (sftp://, rclone:) needs its
   network to resolve, so it runs on the default bridge and the repo string
   is passed through unchanged — the container resolves it with its own
-  resolver and the operator's own credentials (an sftp sandbox needs the
+  resolver and the user's own credentials (an sftp sandbox needs the
   ssh key; `~/.ssh` is bind-mounted read-only for that case);
 * the host's **restic binary** is `docker cp`'d into the container at
   /usr/local/bin/restic (no image build, no publish, no multi-runtime
@@ -155,7 +155,7 @@ class Sandbox:
             "--label", f"{OWNER_LABEL}={os.getpid()}",
         ]
         if self._passfile:
-            # Opt-in (R2/R24 honoured): the operator mounts a host password
+            # Opt-in (R2/R24 honoured): the user mounts a host password
             # FILE read-only at a fixed in-container path and the in-container
             # restic reads it there. restverify never reads the file itself.
             mount_args += ["--volume", f"{Path(self._passfile).resolve()}:{PASSFILE_INNER}:ro"]

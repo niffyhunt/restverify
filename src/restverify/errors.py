@@ -23,7 +23,7 @@ ERROR_KINDS = frozenset({
     "source", "manifest", "sample", "tempdir", "history", "interrupted",
 })
 
-# Ruling (I4, operator-confirmed): "history" was ADDED to the vocabulary after
+# Ruling (I4): "history" was ADDED to the vocabulary after
 # I3 froze it at ten members, because the durable store needs a kind of its own
 # and no existing member fits (config -> 64 is a usage problem; the store is
 # machine state whose failures are exit 1). That is an explicit amendment of

@@ -271,7 +271,7 @@ def test_template_workflow_pins_a_tag_and_schedules_the_drill():
     assert "RESTVERIFY_HOME" in text
     assert "secrets.RESTVERIFY_REPO" in text, \
         "the user's repository location stays a secret"
-    assert "--no-source" in text, "the restore-only placeholder stays honest"
+    assert "--no-source" in text, "the restore-only placeholder stays as documented"
 
 
 # ── shipping surface ───────────────────────────────────────────────────────

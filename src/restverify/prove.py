@@ -6,7 +6,7 @@ every filesystem write happens in tempstore-controlled dirs.
 The verification has two layers, and the module docstring states both:
 
 1. Sampled-file check (existence + size) against restic's own `ls --json`
-   listing. SIZE-ONLY per file, honestly stated: ls exposes no content hashes
+   listing. SIZE-ONLY per file: ls exposes no content hashes
    (measured on restic 0.16.4), so per-file content comparison without a
    source is impossible. It still bites: with one flipped byte in a real
    pack, `restic restore` exits 0 writing a 0-byte file where the listing
@@ -19,9 +19,8 @@ The verification has two layers, and the module docstring states both:
    contains errors" — this layer catches corruptions the size check cannot
    see (e.g. a zero-for-zero byte swap).
 
-The original build shipped layer 1 only and called it "honest scope"; the
-operator rejected that framing and layer 2 was added in this same commit
-series. The ruling is recorded in tests/test_i13_prove.py.
+The original build shipped layer 1 only; review asked why, and layer 2 was
+added in this same commit series.
 
 Sampling is deterministic: the same (file list, percent, seed) always yields
 the same sample. The default seed is derived from the snapshot id, so runs are
@@ -240,7 +239,7 @@ def _keystream(key: bytes, counter_block: bytes, n_blocks: int):
         yield block
 
 
-# ── the DRBG (CTR mode per the operator spec) ─────────────────────────────
+# ── the DRBG (counter-mode, per the approved plan) ─────────────────────────
 
 class SamplingDRBG:
     """Counter-mode AES-256-CTR DRBG on the stdlib only.

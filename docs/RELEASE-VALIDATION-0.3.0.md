@@ -31,8 +31,8 @@ no `tests/`, no `__pycache__`, no `history.db`. Sdist is allowlist-based.
 
 | Artefact | sha256 |
 |----------|--------|
-| `restverify-0.3.0-py3-none-any.whl` | `c5b3b9c83193cf47ca405c92bcaa9bbb9f3dc113bd3eda71bbb794599fd3e333` |
-| `restverify-0.3.0.tar.gz` | `a27a130648e81643e678b88ac855744d3f2d0fc271b0a93fa1aafada258cf6f3` |
+| `restverify-0.3.0-py3-none-any.whl` | `5551d58a14d4cb14327a77323d84f38769f6fb6b5d3a80883f2c85031889783c` |
+| `restverify-0.3.0.tar.gz` | `36f8ccb13eba3db17fde68409bf621e40135b009832ba17149bbd477e24d0bb5` |
 
 Both are GPG-detach-signed (`.asc` next to the artefacts); round-trip
 `gpg --verify` passed for both. NOTE: the README fixups in this commit

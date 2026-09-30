@@ -100,7 +100,7 @@ Symlinks are recorded with their target and never followed (following one
 could read outside the restore target). A path that was a file and came back
 as a symlink is an error, not a silent read.
 
-**Honest scope:** without a source comparison (`--no-source`), a run proves
+**Scope note:** without a source comparison (`--no-source`), a run proves
 the restore *completed* — not that the data matches. The comparison is what
 makes it verification; bring a source path when it matters.
 
@@ -155,10 +155,10 @@ share** of the repository's data packs (`--sample 100` becomes a full
 `--read-data`), which verifies the repository's cryptographic seals by
 reading the data back.
 
-Honesty about the per-file half: `restic ls --json` exposes no content
+Per-file limits, stated plainly: `restic ls --json` exposes no content
 hashes (measured on restic 0.16.4), so the per-file claim is existence +
-size only — `hashes_available` is `false` in the envelope, stated everywhere
-rather than papered over. The content half is covered by the seal check:
+size only — `hashes_available` is `false` in the envelope. The content half
+is covered by the seal check:
 with one flipped byte in a real pack, `restic restore` exits 0 writing a
 0-byte file (the size check catches that one) while `check` reports the
 corruption — `prove` catches both.
