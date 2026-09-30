@@ -140,6 +140,60 @@ webhook's. Validation happens before anything runs (`https://` only, timeout
 attempt). Redirects are refused, credentials in the URL are never transmitted
 or logged, and there are no retries — one attempt, one line of truth.
 
+### Prove a snapshot: `prove`
+
+```bash
+restverify prove -r /srv/backup                # sample 10% of the newest snapshot
+restverify prove -r /srv/backup --sample 100   # every file, plus a full seal check
+restverify prove -r /srv/backup --seed 7       # a different deterministic sample
+```
+
+`prove` restores a **deterministic sample** of the snapshot's files and
+verifies each one against restic's own `ls --json` record — and it adds a
+second layer on top: `restic check --read-data-subset N%` over the **same
+share** of the repository's data packs (`--sample 100` becomes a full
+`--read-data`), which verifies the repository's cryptographic seals by
+reading the data back.
+
+Honesty about the per-file half: `restic ls --json` exposes no content
+hashes (measured on restic 0.16.4), so the per-file claim is existence +
+size only — `hashes_available` is `false` in the envelope, stated everywhere
+rather than papered over. The content half is covered by the seal check:
+with one flipped byte in a real pack, `restic restore` exits 0 writing a
+0-byte file (the size check catches that one) while `check` reports the
+corruption — `prove` catches both.
+
+Sampling is reproducible: same file list, same percent, same seed → same
+sample. The default seed derives from the snapshot id, so re-running prove
+on an unchanged snapshot re-checks the same files. The largest file is
+always included — the likeliest corruption canary is never left to chance.
+
+Exit codes are the standing contract: 0 all verified, 2 at least one sampled
+file missing or size-differs **or** the seal check failed, 1 restic
+failures (including a locked repository — that is could-not-complete, not
+corruption), 64 usage.
+
+### Browse the history: `dashboard`
+
+```bash
+restverify dashboard                # prints a http://127.0.0.1:PORT/ URL
+restverify dashboard --port 8765    # a fixed port instead of a random one
+```
+
+One stdlib web page, read-only end to end: the newest 50 runs (status, exit
+code, repo, snapshot, duration) plus a pass/mismatch/error summary. The
+history database is opened with SQLite `mode=ro` — never created, never
+written. No framework, no JavaScript, no form, no external resources.
+
+Built-in defenses, each pinned by a test: binds `127.0.0.1` (a random free
+port unless `--port`); `--bind-all` is refused (exit 64, before any socket
+exists) unless paired with `--yes-i-know`; the `Host` header must name the
+bound address, so a DNS-rebinding page cannot aim a browser at it; every
+database value is HTML-escaped; responses carry `CSP: default-src 'none';
+style-src 'unsafe-inline'`, `nosniff`, and `Cache-Control: no-store`; GET
+and HEAD on `/` only — other paths 404, other methods 405; request logs
+never repeat query strings. Ctrl-C exits cleanly.
+
 ## On a schedule
 
 ```bash
@@ -232,6 +286,7 @@ included, because a trend that hides failures is worse than no trend.
   prune announces itself on stderr)
 - read it with `restverify report`, or machine-read it with
   `restverify report --json`
+- browse it in a browser with `restverify dashboard` (localhost, read-only)
 - `--dry-run` writes nothing
 
 Moving the whole layout (config + state) for CI or drills:

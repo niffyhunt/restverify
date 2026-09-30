@@ -2,6 +2,69 @@
 
 ## [Unreleased]
 
+## [0.3.0] — the proof-and-visibility release — 2026-09-30
+
+Three increments from the operator-approved spec, on one train. Spec ids
+I8/I9/I10 (and R44–R46) are consumed by shipped history (signed release,
+scale drill, CI action, sandbox), so this train continues at I12–I14
+(R47–R49) — renumbering declared up front, before any code.
+
+### Added — I12: `run --report-webhook URL` (R47)
+- After the run — pass, mismatch, or error — the exact `--json` envelope is
+  POSTed to the URL (`application/json`, UA `restverify/<version>`).
+  Best-effort by contract: delivery failure is one stderr line and never
+  changes the exit code. `https://` only; timeout `0 < t <= 60` (default
+  10); no retries; redirects refused; URL credentials never transmitted or
+  logged. Bad flags are exit 64 before anything runs. `--dry-run` sends
+  nothing. One new module (`webhook.py`) is allowed outbound network; the
+  boundary tests were amended in place with the reason.
+
+### Added — I13: `prove` (R48) — prove a snapshot by restoring a sample
+- **`restverify prove -r <repo> [--sample N] [--seed INT] [--snapshot
+  SELECTOR] [--dry-run] [-x PATTERN]`**: restores a deterministic sample of
+  the snapshot's files and verifies each against restic's own `ls --json`
+  record. Exactly `ceil(N × percent/100)` files; the largest file is always
+  included; the default seed derives from the snapshot id, so runs are
+  reproducible. Zero-runtime-dependency sampling: a counter-mode AES-256
+  DRBG on the standard library only, pinned against FIPS-197 C.3 and NIST
+  SP 800-38A F.5.5.
+- **Honest per-file scope, stated everywhere**: `restic ls --json` exposes
+  no content hashes (measured on 0.16.4), so `hashes_available` is `false`
+  and the per-file claim is existence + size.
+
+### Added — I13a: the prove content check (operator ruling)
+- During review the operator asked why "honest scope" could not be fixed.
+  It could: the repository format seals its data, and `restic check
+  --read-data-subset N%` (read-only, present in 0.16.4) verifies those
+  seals over the same share of packs as the file sample (`--sample 100` →
+  full `--read-data`). A failed seal is a data verdict (exit 2); a locked
+  repository is could-not-complete (exit 1) — never misreported as
+  corruption.
+
+### Added — I14: `dashboard` (R49) — the run history as a local page
+- One stdlib page, read-only end to end: newest 50 runs + a
+  pass/mismatch/error summary; SQLite `mode=ro` (never created, never
+  written); missing store renders a no-runs-yet page. Binds 127.0.0.1
+  (random free port by default); `--bind-all` refused before any socket
+  unless `--yes-i-know`; Host-header allow-list (DNS-rebinding defense);
+  every database value HTML-escaped; CSP `default-src 'none'; style-src
+  'unsafe-inline'`, nosniff, no-store; GET/HEAD on `/` only; query strings
+  never logged; Ctrl-C exits 0. dashboard.py is the ONE listener module —
+  the N4 boundary tests carry an explicit, documented carve-out.
+
+### Fixed
+- `restic restore --include` escaping order is load-bearing (measured on
+  0.16.4): double literal backslashes FIRST, then glob-escape — the other
+  order breaks on filenames like `weird[1].txt`. Prove excludes are decided
+  in code before the restore (restic-style matching) so the tool restores
+  exactly the paths it verifies.
+
+### Notes
+- No new runtime dependencies (`dependencies = []` holds; the AES
+  implementation is stdlib-only and vector-pinned in the test suite).
+- Exit-code contract unchanged: 0 verified, 1 could-not-complete,
+  2 data differs, 64 usage.
+
 ## [0.2.1] — the sandboxed-restore release — 2026-09-29
 
 I11 (R45) rides this train exactly as the approved plan stated — the 0.2.0
