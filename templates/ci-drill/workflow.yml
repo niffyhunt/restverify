@@ -18,7 +18,7 @@
 #              leg; keep --no-source if you only want the restore proof.
 #
 # Supply chain: this template uses the reusable composite action shipped in
-# the restverify repository (pinned here to v0.2.1 — move the pin only after
+# the restverify repository (pinned here to v0.3.1 — move the pin only after
 # verifying the new tag's signature, docs/RELEASE.md). The action downloads
 # the released restverify wheel, verifies its GPG signature against the
 # release key, installs it, and runs the drill. No token beyond checkout.
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Restore-drill (happy fixture proof + your repository)
-        uses: niffyhunt/restverify/.github/actions/restore-drill@v0.3.0  # override only if you fork elsewhere
+        uses: niffyhunt/restverify/.github/actions/restore-drill@v0.3.1  # override only if you fork elsewhere
         env:
           # R43: relocate the whole restverify layout out of the runner's
           # real home — config and state land under this one subtree.
