@@ -72,6 +72,8 @@ jobs:
 
       - name: 'Run the shipped composite action against the staged artefact'
         uses: ./.github/actions/restore-drill
+        env:
+          DRILL_PASS_FILE: ${{ runner.temp }}/drill-pass
         with:
           version: '${{ steps.stage.outputs.version }}'
           base_url: 'file://${{ github.workspace }}/release-staging'
